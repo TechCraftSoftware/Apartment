@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
-import { extractAdminIdFromHeaders } from '@/server/services/authService';
+import { getAdminFromRequest } from '@/server/services/authService';
 import {
   addBlockedDateRange,
   createCustomerBookingRequest,
   createExternalBookingByAdmin,
   deleteApartmentListing,
   getFullPlatformState,
+  getPublicPlatformState,
+  pickPublicBookingInput,
   removeBlockedDateRange,
   reviewBankTransferReceipt,
   saveApartmentListing,
@@ -13,15 +15,18 @@ import {
 } from '@/server/services/marketplaceService';
 import { updateRealtorClientConfig } from '@/server/services/realtorConfigService';
 import { adminReissueBookingVerificationCode } from '@/server/services/customerAndVerificationService';
-import { resetDatabaseToSeed } from '@/server/db/database';
+import { resetDatabaseToSeed, withDatabaseTransaction, readDatabase } from '@/server/db/database';
 
 export const dynamic = 'force-dynamic';
 
+// Actions any visitor may perform. Everything else requires an admin session.
+const PUBLIC_ACTIONS = new Set(['CREATE_BOOKING']);
+
 export async function GET(request: Request) {
   try {
-    const actorUserId = extractAdminIdFromHeaders(request.headers);
-    const state = getFullPlatformState(actorUserId);
-    return NextResponse.json(state);
+    const admin = getAdminFromRequest(request);
+    const state = admin ? getFullPlatformState(admin.id) : getPublicPlatformState();
+    return NextResponse.json(state, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to load platform state.' },
@@ -33,20 +38,30 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const actorUserId =
-      body.actorUserId ||
-      extractAdminIdFromHeaders(request.headers) ||
-      'usr-realtor-admin-1';
+    const admin = getAdminFromRequest(request);
+
+    if (!admin && !PUBLIC_ACTIONS.has(body.action)) {
+      return NextResponse.json(
+        { error: 'Authentication required. Please sign in to the Realtor Admin Dashboard.' },
+        { status: 401 }
+      );
+    }
+
+    // Only ever derived from the httpOnly admin session cookie.
+    const actorUserId = admin ? admin.id : '';
 
     switch (body.action) {
       case 'CREATE_BOOKING': {
-        const res = createCustomerBookingRequest(body.booking || body);
+        const rawBooking = body.booking || body;
+        const res = createCustomerBookingRequest(
+          admin ? rawBooking : pickPublicBookingInput(rawBooking)
+        );
         if (!res.ok) {
           return NextResponse.json({ error: res.error }, { status: res.status });
         }
         return NextResponse.json({
           ...res,
-          state: getFullPlatformState(actorUserId),
+          state: admin ? getFullPlatformState(actorUserId) : getPublicPlatformState(),
         });
       }
 
@@ -161,7 +176,12 @@ export async function POST(request: Request) {
       }
 
       case 'RESET_DEMO_DATA': {
+        // Keep admin sessions so the operator stays signed in after the reset.
+        const adminSessions = readDatabase().adminSessions;
         resetDatabaseToSeed();
+        withDatabaseTransaction((db) => {
+          db.adminSessions = adminSessions;
+        });
         return NextResponse.json({
           ok: true,
           message: 'Database reset to default Single-Client Realtor seed state.',

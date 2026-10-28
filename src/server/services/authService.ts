@@ -1,5 +1,9 @@
-import { readDatabase } from '@/server/db/database';
+import crypto from 'crypto';
+import { readDatabase, withDatabaseTransaction } from '@/server/db/database';
 import { AdminUserRecord, UserRole } from '@/server/db/schema';
+
+export const ADMIN_SESSION_COOKIE = 'verdant_admin_session';
+export const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 hours
 
 export interface PublicAdminProfile {
   id: string;
@@ -33,21 +37,66 @@ export function getAdminById(userId: string | undefined): AdminUserRecord | unde
   return db.adminUsers.find((u) => u.id === userId && u.isActive);
 }
 
-export function extractAdminIdFromHeaders(headers: Headers): string | undefined {
-  const headerUserId = headers.get('x-platform-user-id');
-  if (headerUserId && headerUserId.trim()) {
-    return headerUserId.trim();
-  }
+function hashAdminSessionToken(rawToken: string): string {
+  return crypto.createHash('sha256').update(`verdant-admin-session:${rawToken}`).digest('hex');
+}
 
+/**
+ * Issues an opaque random admin session token. Only its SHA-256 hash is
+ * persisted; the raw token lives solely in the httpOnly session cookie.
+ */
+export function createAdminSession(userId: string): { token: string; expiresAt: string } {
+  const token = crypto.randomBytes(32).toString('base64url');
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ADMIN_SESSION_TTL_SECONDS * 1000).toISOString();
+
+  withDatabaseTransaction((db) => {
+    db.adminSessions = db.adminSessions.filter((s) => new Date(s.expiresAt) > now);
+    db.adminSessions.unshift({
+      id: `admsess-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      tokenHash: hashAdminSessionToken(token),
+      userId,
+      expiresAt,
+      createdAt: now.toISOString(),
+    });
+  });
+
+  return { token, expiresAt };
+}
+
+export function revokeAdminSession(token: string | undefined): void {
+  if (!token) return;
+  const tokenHash = hashAdminSessionToken(token);
+  withDatabaseTransaction((db) => {
+    db.adminSessions = db.adminSessions.filter((s) => s.tokenHash !== tokenHash);
+  });
+}
+
+export function getAdminBySessionToken(token: string | undefined): AdminUserRecord | undefined {
+  if (!token) return undefined;
+  const db = readDatabase();
+  const tokenHash = hashAdminSessionToken(token);
+  const now = new Date();
+  const session = db.adminSessions.find(
+    (s) => s.tokenHash === tokenHash && new Date(s.expiresAt) > now
+  );
+  if (!session) return undefined;
+  return db.adminUsers.find((u) => u.id === session.userId && u.isActive);
+}
+
+export function extractAdminSessionToken(headers: Headers): string | undefined {
   const cookieHeader = headers.get('cookie');
-  if (cookieHeader) {
-    const match = cookieHeader.match(/(?:^|;\s*)verdant_session_user=([^;]+)/);
-    if (match && match[1]) {
-      return decodeURIComponent(match[1]);
-    }
-  }
+  if (!cookieHeader) return undefined;
+  const match = cookieHeader.match(/(?:^|;\s*)verdant_admin_session=([^;]+)/);
+  return match && match[1] ? decodeURIComponent(match[1]) : undefined;
+}
 
-  return undefined;
+/**
+ * Resolves the signed-in Realtor Admin from the request's httpOnly session
+ * cookie. Client-supplied user ids (headers, body, query) are never trusted.
+ */
+export function getAdminFromRequest(request: Request): AdminUserRecord | undefined {
+  return getAdminBySessionToken(extractAdminSessionToken(request.headers));
 }
 
 export function requireRealtorAdmin(

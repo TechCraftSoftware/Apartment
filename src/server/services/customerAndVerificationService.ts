@@ -735,3 +735,49 @@ export function verifyBookingWithCode(input: {
     accessToken: result.sessionToken,
   };
 }
+
+/**
+ * The guest's own copy of a booking: strips administrator-only fields
+ * (internal notes, approver ids, status history notes) before it leaves the server.
+ */
+export function toGuestBooking(booking: Booking): Booking {
+  const { adminNotes, approvedByUserId, statusHistory, ...rest } = booking;
+  return {
+    ...rest,
+    statusHistory: (statusHistory || []).map((h) => ({ ...h, note: '' })),
+  };
+}
+
+/**
+ * Issues a short-lived (30 minute) booking-access session for a booking the
+ * caller has just proven ownership of (completed payment or bank-transfer
+ * submission). Same session store the /my-booking code verification uses.
+ */
+export function issueBookingAccessSession(
+  bookingId: string
+): { sessionToken: string; sessionExpiresAt: string } | null {
+  return withDatabaseTransaction((db) => {
+    const booking = db.bookings.find((b) => b.id === bookingId);
+    if (!booking) return null;
+
+    const customerId =
+      booking.customerId ||
+      db.customers.find((c) => c.email.toLowerCase() === booking.guestEmail.toLowerCase())?.id ||
+      '';
+    const now = new Date();
+    const sessionToken = generateBookingSessionToken();
+    const sessionExpiresAt = new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+
+    db.bookingAccessSessions.unshift({
+      id: `bksess-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      tokenHash: hashSessionToken(sessionToken),
+      bookingId: booking.id,
+      bookingReference: booking.bookingReference,
+      customerId,
+      expiresAt: sessionExpiresAt,
+      createdAt: now.toISOString(),
+    });
+
+    return { sessionToken, sessionExpiresAt };
+  });
+}

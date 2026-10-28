@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createCustomerBookingRequest } from '@/server/services/marketplaceService';
+import {
+  createCustomerBookingRequest,
+  pickPublicBookingInput,
+} from '@/server/services/marketplaceService';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const result = createCustomerBookingRequest(body);
+    const result = createCustomerBookingRequest(pickPublicBookingInput(body));
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });

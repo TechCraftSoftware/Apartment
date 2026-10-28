@@ -17,7 +17,7 @@ import { useBookingContext } from '@/context/BookingContext';
 export function Navbar() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { resetDemoData, realtorConfig } = useBookingContext();
+  const { resetDemoData, realtorConfig, isAdminAuthenticated } = useBookingContext();
 
   const navLinks = [
     { href: '/', label: 'Home' },
@@ -79,15 +79,17 @@ export function Navbar() {
 
         {/* Right Actions */}
         <div className="hidden md:flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={resetDemoData}
-            title="Restore initial sample apartments, bookings, verification codes, and calendar blocks"
-            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium text-stone-600 hover:text-stone-900 hover:bg-stone-200/60 transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            Reset Demo
-          </button>
+          {isAdminAuthenticated && (
+            <button
+              type="button"
+              onClick={resetDemoData}
+              title="Restore initial sample apartments, bookings, verification codes, and calendar blocks"
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium text-stone-600 hover:text-stone-900 hover:bg-stone-200/60 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reset Demo
+            </button>
+          )}
 
           <Link
             href="/my-booking"

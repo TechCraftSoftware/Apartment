@@ -6,6 +6,8 @@ import {
   updateBookingStatus,
   cancelBookingByVerifiedCustomer,
   getPublicAvailabilityPayload,
+  getPublicPlatformState,
+  pickPublicBookingInput,
   reviewBankTransferReceipt,
 } from '../src/server/services/marketplaceService';
 import {
@@ -29,7 +31,12 @@ import {
   getRealtorClientConfig,
   updateRealtorClientConfig,
 } from '../src/server/services/realtorConfigService';
-import { loginAdminUser } from '../src/server/services/authService';
+import {
+  loginAdminUser,
+  createAdminSession,
+  getAdminBySessionToken,
+  revokeAdminSession,
+} from '../src/server/services/authService';
 
 async function runVerificationSuite() {
   console.log('=============================================================');
@@ -442,6 +449,48 @@ async function runVerificationSuite() {
   assert.equal(serialized.includes('Chidinma'), false, 'Public calendar must not leak guest names');
   assert.equal(serialized.includes('chidinma.okafor'), false, 'Public calendar must not leak emails');
   assert.equal(serialized.includes('08035550199'), false, 'Public calendar must not leak phones');
+
+  // Public platform state (anonymous /api/platform/state) must not carry private records
+  const publicState = getPublicPlatformState() as Record<string, unknown>;
+  for (const key of ['bookings', 'customers', 'payments', 'notifications', 'auditLogs', 'blocks', 'blockedDates']) {
+    assert.equal(key in publicState, false, `Public state must not include ${key}`);
+  }
+  const serializedState = JSON.stringify(publicState);
+  assert.equal(serializedState.includes('chidinma.okafor'), false, 'Public state must not leak emails');
+  assert.equal(serializedState.includes('devModeCodePreview'), false, 'Public state must not leak access codes');
+  assert.equal(publicState.currentUser, null);
+
+  // Public booking requests cannot set privileged fields
+  const sanitizedInput = pickPublicBookingInput({
+    apartmentId: 'apt-1',
+    guestName: 'X',
+    guestEmail: 'x@example.com',
+    guestPhone: '1',
+    checkIn: '2030-01-01',
+    checkOut: '2030-01-03',
+    guests: 2,
+    initialStatus: 'Confirmed',
+    initialPaymentStatus: 'Paid',
+    amountPaid: 999999,
+    adminNotes: 'pwn',
+    source: 'WHATSAPP',
+  });
+  assert.equal(sanitizedInput.initialStatus, undefined);
+  assert.equal(sanitizedInput.initialPaymentStatus, undefined);
+  assert.equal(sanitizedInput.amountPaid, undefined);
+  assert.equal(sanitizedInput.source, undefined);
+
+  // Admin sessions: opaque token, hashed at rest, revocable
+  const adminSession = createAdminSession(adminId);
+  assert.equal(getAdminBySessionToken(adminSession.token)?.id, adminId);
+  assert.equal(getAdminBySessionToken(adminId), undefined, 'Raw admin id must not act as a session');
+  assert.equal(
+    JSON.stringify(readDatabase().adminSessions).includes(adminSession.token),
+    false,
+    'Admin session token must be stored hashed'
+  );
+  revokeAdminSession(adminSession.token);
+  assert.equal(getAdminBySessionToken(adminSession.token), undefined, 'Revoked session must be rejected');
 
   // Reset database back to clean initial seed
   resetDatabaseToSeed();

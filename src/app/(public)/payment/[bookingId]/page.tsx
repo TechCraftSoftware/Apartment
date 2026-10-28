@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -17,6 +17,10 @@ import {
   Smartphone,
 } from 'lucide-react';
 import { useBookingContext } from '@/context/BookingContext';
+import {
+  getStoredBookingAccessToken,
+  useGuestBooking,
+} from '@/lib/bookingAccessClient';
 import {
   BookingStatusBadge,
   PaymentStatusBadge,
@@ -51,12 +55,30 @@ export default function PaymentInitiationPage() {
   } = useBookingContext();
 
   const bookingId = params?.bookingId || '';
-  const booking = bookings.find(
-    (b) =>
-      b.id === bookingId ||
-      b.reference === bookingId ||
-      b.bookingReference === bookingId
-  );
+  // Guests load only the booking their access session unlocks; signed-in
+  // admins can fall back to the records they already hold.
+  const { booking: guestBooking, isLoading: isGuestBookingLoading } =
+    useGuestBooking(bookingId);
+  const booking =
+    guestBooking ||
+    bookings.find(
+      (b) =>
+        b.id === bookingId ||
+        b.reference === bookingId ||
+        b.bookingReference === bookingId
+    );
+
+  // Simulated Paystack gateway for a new checkout attempt
+  // (/payment/<checkoutId>?reference=...&checkout=simulated).
+  const [simulatedCheckoutReference, setSimulatedCheckoutReference] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('checkout') === 'simulated' && query.get('reference')) {
+      setSimulatedCheckoutReference(query.get('reference'));
+    }
+  }, []);
 
   const [paymentChoice, setPaymentChoice] = useState<'FullPayment' | 'Deposit'>(
     realtorConfig.paymentPolicy === 'Deposit' ? 'Deposit' : 'FullPayment'
@@ -69,10 +91,51 @@ export default function PaymentInitiationPage() {
   const [initializedPayment, setInitializedPayment] =
     useState<InitializedPaymentState | null>(null);
 
-  if (!isHydrated) {
+  if (!isHydrated || isGuestBookingLoading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-20">
         <LoadingState />
+      </div>
+    );
+  }
+
+  if (!booking && simulatedCheckoutReference) {
+    const goToCallback = (outcome: 'success' | 'failed') => {
+      router.push(
+        `/payment/callback?reference=${encodeURIComponent(
+          simulatedCheckoutReference
+        )}&checkoutId=${encodeURIComponent(bookingId)}&outcome=${outcome}&channel=card`
+      );
+    };
+    return (
+      <div className="max-w-xl mx-auto px-4 py-20">
+        <div className="bg-white rounded-3xl border border-stone-200 p-8 space-y-5 shadow-md text-center">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
+            <CreditCard className="w-7 h-7" />
+          </div>
+          <h1 className="font-serif text-2xl font-bold text-stone-900">
+            Paystack Test Checkout (Simulated)
+          </h1>
+          <p className="text-xs text-stone-600">
+            Reference: <code className="font-mono font-bold">{simulatedCheckoutReference}</code>
+          </p>
+          <div className="flex justify-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => goToCallback('success')}
+              className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold"
+            >
+              Simulate Successful Payment
+            </button>
+            <button
+              type="button"
+              onClick={() => goToCallback('failed')}
+              className="px-5 py-2.5 rounded-xl border border-stone-300 text-stone-800 text-xs font-semibold"
+            >
+              Simulate Declined Payment
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -82,7 +145,7 @@ export default function PaymentInitiationPage() {
       <div className="max-w-3xl mx-auto px-4 py-20">
         <EmptyState
           title="Booking Not Found for Payment"
-          description="We could not locate a booking record matching this identifier."
+          description="We could not load this booking in this browser session. Verify your booking on My Booking first, then return to pay."
           actionLabel="Go to My Booking"
           onAction={() => router.push('/my-booking')}
         />
@@ -115,7 +178,10 @@ export default function PaymentInitiationPage() {
     try {
       const res = await fetch('/api/payments/initialize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-booking-access-token': getStoredBookingAccessToken() || '',
+        },
         body: JSON.stringify({
           bookingId: booking.id,
           paymentChoice: amountPaid > 0 ? 'Balance' : paymentChoice,

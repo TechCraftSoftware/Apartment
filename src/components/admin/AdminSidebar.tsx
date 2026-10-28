@@ -83,8 +83,8 @@ export function AdminSidebar({ mobileOpen, onCloseMobile }: AdminSidebarProps) {
     },
   ];
 
-  const handleLogout = () => {
-    logoutAdmin();
+  const handleLogout = async () => {
+    await logoutAdmin();
     router.push('/admin/login');
   };
 

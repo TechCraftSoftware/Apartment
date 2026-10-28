@@ -593,7 +593,7 @@ export default function AdminBookingDetailPage() {
                     </div>
 
                     <a
-                      href={`/api/receipts/${booking.receiptStorageKey}?actorUserId=usr-realtor-admin-1`}
+                      href={`/api/receipts/${booking.receiptStorageKey}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-800 hover:bg-brand-900 text-white text-xs font-semibold transition-colors shadow-2xs"

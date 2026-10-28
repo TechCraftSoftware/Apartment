@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { reviewBankTransferReceipt } from '@/server/services/marketplaceService';
+import { getAdminFromRequest } from '@/server/services/authService';
 
 export async function POST(
   request: NextRequest,
@@ -8,13 +9,18 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const actorUserId =
-      request.headers.get('x-actor-user-id') || body.actorUserId;
+    const admin = getAdminFromRequest(request);
+    if (!admin) {
+      return NextResponse.json(
+        { error: 'Authentication required. Please sign in to the Realtor Admin Dashboard.' },
+        { status: 401 }
+      );
+    }
 
     const result = reviewBankTransferReceipt(
-      actorUserId,
+      admin.id,
       id,
-      body.action,
+      body.reviewAction || body.action,
       body.rejectionReason
     );
 

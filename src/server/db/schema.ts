@@ -27,6 +27,14 @@ export interface AdminUserRecord {
   updatedAt: string;
 }
 
+export interface AdminSessionRecord {
+  id: string;
+  tokenHash: string; // SHA-256 hash of the opaque admin session token (never plaintext)
+  userId: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface PropertyRecord {
   id: string;
   clientId: string;
@@ -262,6 +270,7 @@ export interface PlatformDatabaseSchema {
   schemaVersion: number;
   realtorConfig: RealtorClientConfig;
   adminUsers: AdminUserRecord[];
+  adminSessions: AdminSessionRecord[];
   properties: PropertyRecord[];
   apartments: ApartmentUnitRecord[];
   customers: CustomerRecord[];

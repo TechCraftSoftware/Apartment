@@ -21,6 +21,7 @@ import {
   Landmark,
 } from 'lucide-react';
 import { useBookingContext } from '@/context/BookingContext';
+import { useGuestBooking } from '@/lib/bookingAccessClient';
 import {
   BookingStatusBadge,
   PaymentStatusBadge,
@@ -47,14 +48,20 @@ export default function BookingConfirmationPage() {
   } = useBookingContext();
 
   const bookingId = params?.id || '';
-  const booking = bookings.find(
-    (b) =>
-      b.id === bookingId ||
-      b.reference === bookingId ||
-      b.bookingReference === bookingId
-  );
+  // Guests see only the booking their access session unlocks; signed-in admins
+  // can fall back to the records they already hold.
+  const { booking: guestBooking, isLoading: isGuestBookingLoading } =
+    useGuestBooking(bookingId);
+  const booking =
+    guestBooking ||
+    bookings.find(
+      (b) =>
+        b.id === bookingId ||
+        b.reference === bookingId ||
+        b.bookingReference === bookingId
+    );
 
-  if (!isHydrated) {
+  if (!isHydrated || isGuestBookingLoading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-20">
         <LoadingState />
@@ -67,9 +74,9 @@ export default function BookingConfirmationPage() {
       <div className="max-w-3xl mx-auto px-4 py-20">
         <EmptyState
           title="Booking Record Not Found"
-          description="We could not locate a booking with this identifier."
-          actionLabel="Return to Apartments"
-          onAction={() => router.push('/apartments')}
+          description="We could not load this booking in this browser session. Use your booking reference and access code on My Booking to view it."
+          actionLabel="Go to My Booking"
+          onAction={() => router.push('/my-booking')}
         />
       </div>
     );

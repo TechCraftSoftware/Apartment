@@ -88,6 +88,23 @@ export interface CreateCustomerBookingInput {
   customVerificationExpiryMinutes?: number;
 }
 
+/**
+ * Restricts an untrusted (public) booking request to guest-supplied fields so
+ * visitors cannot set status, payment, source, notes, ids or references.
+ */
+export function pickPublicBookingInput(raw: Record<string, unknown>): CreateCustomerBookingInput {
+  return {
+    apartmentId: String(raw.apartmentId ?? ''),
+    guestName: String(raw.guestName ?? ''),
+    guestEmail: String(raw.guestEmail ?? ''),
+    guestPhone: String(raw.guestPhone ?? ''),
+    checkIn: String(raw.checkIn ?? ''),
+    checkOut: String(raw.checkOut ?? ''),
+    guests: Number(raw.guests ?? raw.guestCount) || 0,
+    specialRequests: typeof raw.specialRequests === 'string' ? raw.specialRequests : undefined,
+  };
+}
+
 export function createCustomerBookingRequest(
   input: CreateCustomerBookingInput
 ):
@@ -1050,7 +1067,7 @@ export function removeBlockedDateRange(
   });
 }
 
-export function getFullPlatformState(actorUserId?: string) {
+export function getFullPlatformState(actorUserId: string) {
   const db = readDatabase();
   const currentAdmin = getAdminById(actorUserId);
 
@@ -1066,5 +1083,27 @@ export function getFullPlatformState(actorUserId?: string) {
     payments: db.payments,
     notifications: db.notifications.slice(0, 50),
     auditLogs: db.auditLogs.slice(0, 50),
+  };
+}
+
+/**
+ * State served to anonymous visitors: branding/config, active listings and
+ * neutral occupied intervals only. No bookings, customers, payments,
+ * notifications (which may carry dev-mode access codes) or audit logs.
+ */
+export function getPublicPlatformState() {
+  const db = readDatabase();
+  const activeApartments = db.apartments.filter((apt) => apt.status === 'active');
+  const activeIds = new Set(activeApartments.map((a) => a.id));
+
+  return {
+    realtorConfig: db.realtorConfig,
+    currentUser: null,
+    properties: db.properties.filter((p) => p.status === 'ACTIVE') as PropertyRecord[],
+    apartments: activeApartments as Apartment[],
+    publicOccupiedIntervals: getPublicUnavailableIntervals(
+      db.bookings.filter((b) => activeIds.has(b.apartmentId)),
+      db.blockedDates.filter((bl) => activeIds.has(bl.apartmentId))
+    ),
   };
 }

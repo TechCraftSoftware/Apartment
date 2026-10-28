@@ -436,6 +436,7 @@ export function createSeedDatabaseState(): PlatformDatabaseSchema {
         updatedAt: nowIso,
       },
     ],
+    adminSessions: [],
     properties,
     apartments,
     customers,
@@ -484,6 +485,7 @@ export function runDatabaseMigrations(
     !raw.realtorConfig ||
     !Array.isArray(raw.bookingAccessCredentials) ||
     !Array.isArray(raw.payments) ||
+    !Array.isArray(raw.adminSessions) ||
     !Array.isArray(raw.checkoutAttempts) ||
     !Array.isArray(raw.privateReceipts);
 
@@ -497,6 +499,7 @@ export function runDatabaseMigrations(
       Array.isArray(raw.adminUsers) && raw.adminUsers.length > 0
         ? raw.adminUsers
         : seed.adminUsers,
+    adminSessions: Array.isArray(raw.adminSessions) ? raw.adminSessions : [],
     properties:
       Array.isArray(raw.properties) && raw.properties.length > 0
         ? raw.properties

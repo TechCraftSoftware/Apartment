@@ -33,13 +33,12 @@ import {
 import { formatDisplayDate, formatNaira } from '@/lib/utils';
 import type { CustomerBookingVerifiedView } from '@/types';
 
-const SESSION_TOKEN_STORAGE_KEY = 'verdant_booking_access_session_token_v1';
+import { BOOKING_ACCESS_TOKEN_STORAGE_KEY as SESSION_TOKEN_STORAGE_KEY } from '@/lib/bookingAccessClient';
 
 function MyBookingContent() {
   const searchParams = useSearchParams();
   const {
     realtorConfig,
-    bookings,
     devVerificationCodes,
     refreshPlatformState,
     addToast,
@@ -844,54 +843,41 @@ function MyBookingContent() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {bookings.slice(0, 6).map((bk) => {
-            const ref = bk.bookingReference || bk.reference;
-            const code = devVerificationCodes[ref.toUpperCase()];
+          {/* Only references + dev-mode codes known to this browser (seed demo
+              codes and bookings made here) — never other guests' details. */}
+          {Object.entries(devVerificationCodes).slice(0, 6).map(([ref, code]) => {
             return (
               <div
-                key={bk.id}
+                key={ref}
                 className="p-3.5 rounded-2xl bg-white border border-amber-200/90 flex items-center justify-between gap-3 text-xs"
               >
                 <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-stone-900">
-                      {ref}
-                    </span>
-                    <BookingStatusBadge status={bk.status} size="sm" />
-                    <PaymentStatusBadge
-                      status={bk.paymentStatus || 'Unpaid'}
-                      size="sm"
-                    />
-                  </div>
-                  <p className="text-stone-600">
-                    {bk.guestName} • {bk.guestEmail}
-                  </p>
+                  <span className="font-mono font-bold text-stone-900">
+                    {ref}
+                  </span>
                   <p className="text-[11px] text-amber-900 font-mono">
-                    Dev Code: <strong>{code || 'Request Fresh Code'}</strong>
+                    Dev Code: <strong>{code}</strong>
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-1.5 shrink-0">
-                  {code && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveTab('verify');
-                        setBookingReference(ref);
-                        setVerificationCode(code);
-                        setVerifyError(null);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-semibold"
-                    >
-                      Fill Code
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('verify');
+                      setBookingReference(ref);
+                      setVerificationCode(code);
+                      setVerifyError(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-semibold"
+                  >
+                    Fill Code
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
                       setActiveTab('request-fresh');
                       setFreshRef(ref);
-                      setFreshContact(bk.guestEmail);
                       setVerifyError(null);
                     }}
                     className="px-3 py-1.5 rounded-lg border border-stone-300 hover:bg-stone-100 text-stone-700 font-medium"
