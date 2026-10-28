@@ -388,9 +388,10 @@ export function updateBookingStatus(
     if (newStatus === 'Confirmed' && booking.status !== 'Confirmed') {
       const isBankTransfer = booking.paymentMethod === 'BankTransfer';
       if (isBankTransfer) {
-        const isReceiptVerified = booking.receiptVerificationStatus === 'Verified';
-        const isPaid = (newPaymentStatus || booking.paymentStatus) === 'Paid';
-        if (!isReceiptVerified || !isPaid) {
+        const hasPendingReceipt = booking.receiptVerificationStatus === 'PendingReview';
+        const effectiveStatus = newPaymentStatus || booking.paymentStatus;
+        const isPaid = effectiveStatus === 'Paid' || effectiveStatus === 'Partially Paid';
+        if (hasPendingReceipt || !isPaid) {
           return {
             ok: false as const,
             error:
@@ -399,8 +400,9 @@ export function updateBookingStatus(
           };
         }
       } else {
-        // Paystack
-        const isPaid = (newPaymentStatus || booking.paymentStatus) === 'Paid';
+        // Paystack (full or part payment)
+        const effectiveStatus = newPaymentStatus || booking.paymentStatus;
+        const isPaid = effectiveStatus === 'Paid' || effectiveStatus === 'Partially Paid';
         if (!isPaid) {
           return {
             ok: false as const,
@@ -541,22 +543,19 @@ export function reviewBankTransferReceipt(
       };
     }
 
-    if (booking.paymentMethod !== 'BankTransfer') {
-      return {
-        ok: false as const,
-        error: 'This booking was not submitted via Bank Transfer.',
-        status: 400 as const,
-      };
-    }
-
+    // Review the transfer receipt that is waiting (a booking can have several
+    // transfers when the guest pays in parts).
     const payment = db.payments.find(
-      (p) => p.bookingId === booking.id && p.paymentMethod === 'BankTransfer'
+      (p) =>
+        p.bookingId === booking.id &&
+        p.paymentMethod === 'BankTransfer' &&
+        p.receiptVerificationStatus === 'PendingReview'
     );
     if (!payment) {
       return {
         ok: false as const,
-        error: 'Associated bank transfer payment record not found.',
-        status: 404 as const,
+        error: 'There is no bank transfer receipt waiting for review on this booking.',
+        status: 409 as const,
       };
     }
 
@@ -573,10 +572,15 @@ export function reviewBankTransferReceipt(
       payment.gatewayResponse = `Transfer receipt verified by Realtor Admin (${auth.actor.email})`;
       payment.updatedAt = nowIso;
 
+      // Credit only the amount on this receipt (supports part payments).
+      const newAmountPaid = Math.min(
+        booking.totalPrice,
+        (booking.amountPaid ?? 0) + payment.amount
+      );
       booking.receiptVerificationStatus = 'Verified';
-      booking.paymentStatus = 'Paid';
-      booking.amountPaid = booking.totalPrice;
-      booking.balanceAmount = 0;
+      booking.amountPaid = newAmountPaid;
+      booking.balanceAmount = Math.max(0, booking.totalPrice - newAmountPaid);
+      booking.paymentStatus = newAmountPaid >= booking.totalPrice ? 'Paid' : 'Partially Paid';
       booking.rejectionReason = null;
       // CRITICAL: The booking MUST remain PendingApproval until explicitly approved by the admin!
       if (booking.status === 'Pending') {
@@ -644,7 +648,8 @@ export function reviewBankTransferReceipt(
       payment.updatedAt = nowIso;
 
       booking.receiptVerificationStatus = 'Rejected';
-      booking.paymentStatus = 'Rejected';
+      // Earlier verified payments still count.
+      booking.paymentStatus = (booking.amountPaid ?? 0) > 0 ? 'Partially Paid' : 'Rejected';
       booking.rejectionReason = reason;
       booking.updatedAt = nowIso;
 

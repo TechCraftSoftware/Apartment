@@ -141,7 +141,8 @@ interface BookingContextValue {
   }>;
   submitBankTransferCheckout: (
     checkoutAttemptId: string,
-    receiptKey: string
+    receiptKey: string,
+    transferAmount?: number
   ) => Promise<{
     success: boolean;
     booking?: Booking;
@@ -723,13 +724,14 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
 
   const submitBankTransferCheckout = async (
     checkoutAttemptId: string,
-    receiptKey: string
+    receiptKey: string,
+    transferAmount?: number
   ) => {
     try {
       const res = await fetch('/api/checkout/submit-transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ checkoutAttemptId, receiptKey }),
+        body: JSON.stringify({ checkoutAttemptId, receiptKey, transferAmount }),
       });
       const data = await res.json();
       if (!res.ok) {

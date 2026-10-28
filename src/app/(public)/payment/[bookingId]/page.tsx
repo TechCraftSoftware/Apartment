@@ -73,6 +73,10 @@ export default function PaymentInitiationPage() {
   // Pay the whole outstanding balance, or a part payment of a chosen amount.
   const [payOption, setPayOption] = useState<'full' | 'part'>('full');
   const [partAmount, setPartAmount] = useState('');
+  const [payMethod, setPayMethod] = useState<'paystack' | 'transfer'>('paystack');
+  const [transferFile, setTransferFile] = useState<File | null>(null);
+  const [isSubmittingTransfer, setIsSubmittingTransfer] = useState(false);
+  const [transferSubmittedMessage, setTransferSubmittedMessage] = useState<string | null>(null);
   const [selectedChannel, setSelectedChannel] = useState<
     'card' | 'bank_transfer' | 'ussd'
   >('card');
@@ -227,6 +231,43 @@ export default function PaymentInitiationPage() {
     }
   };
 
+  const handleSubmitTransfer = async () => {
+    setInitError(null);
+    if (payOption === 'part' && !isPartAmountValid) {
+      setInitError(
+        `Enter an amount between ${formatNaira(paymentLimits.minAmount)} and ${formatNaira(paymentLimits.maxAmount)}.`
+      );
+      return;
+    }
+    if (!transferFile) {
+      setInitError('Please upload the receipt for your transfer (PNG, JPG, WEBP or PDF, up to 5 MB).');
+      return;
+    }
+    setIsSubmittingTransfer(true);
+    try {
+      const formData = new FormData();
+      formData.append('bookingId', booking.id);
+      formData.append('amount', String(activeChargeAmount));
+      formData.append('receipt', transferFile);
+      const res = await fetch('/api/my-booking/transfer-payment', {
+        method: 'POST',
+        headers: { 'x-booking-access-token': getStoredBookingAccessToken() || '' },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setInitError(data.error || 'Could not submit your transfer receipt.');
+        return;
+      }
+      setTransferSubmittedMessage(data.message);
+      await refreshPlatformState();
+    } catch {
+      setInitError('Network error while uploading your receipt.');
+    } finally {
+      setIsSubmittingTransfer(false);
+    }
+  };
+
   const handleCompleteTestCheckout = (outcome: 'success' | 'failed') => {
     if (!initializedPayment) return;
     router.push(
@@ -269,7 +310,28 @@ export default function PaymentInitiationPage() {
         </div>
       )}
 
-      {booking.paymentStatus === 'Paid' ? (
+      {transferSubmittedMessage || booking.receiptVerificationStatus === 'PendingReview' ? (
+        <div className="bg-white rounded-3xl border border-amber-200 p-8 text-center space-y-4 shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+            <Landmark className="w-8 h-8" />
+          </div>
+          <h2 className="font-serif text-2xl font-bold text-stone-900">
+            Transfer Receipt Under Review
+          </h2>
+          <p className="text-sm text-stone-600 max-w-md mx-auto">
+            {transferSubmittedMessage ||
+              'We are checking your latest transfer receipt. Your balance will update once it is verified, and you can make another payment after that.'}
+          </p>
+          <div className="flex justify-center pt-2">
+            <Link
+              href="/my-booking"
+              className="px-5 py-2.5 rounded-xl bg-brand-800 text-white text-xs font-semibold"
+            >
+              Back to My Booking
+            </Link>
+          </div>
+        </div>
+      ) : booking.paymentStatus === 'Paid' ? (
         <div className="bg-white rounded-3xl border border-emerald-200 p-8 text-center space-y-4 shadow-xs">
           <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
             <CheckCircle2 className="w-8 h-8" />
@@ -324,6 +386,29 @@ export default function PaymentInitiationPage() {
                     <span className="block text-stone-500">Balance</span>
                     <span className="block font-bold text-stone-900">{formatNaira(remainingBalance)}</span>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-stone-100">
+                  {(
+                    [
+                      ['paystack', 'Card / Paystack', CreditCard],
+                      ['transfer', 'Bank Transfer', Landmark],
+                    ] as const
+                  ).map(([value, label, Icon]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setPayMethod(value)}
+                      className={`inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                        payMethod === value
+                          ? 'bg-white text-stone-900 shadow-xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      {label}
+                    </button>
+                  ))}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -398,6 +483,8 @@ export default function PaymentInitiationPage() {
                   </div>
                 )}
 
+                {payMethod === 'paystack' ? (
+                  <>
                 <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/80 space-y-2 text-xs text-stone-600">
                   <div className="flex items-center justify-between">
                     <span>Paystack Currency</span>
@@ -433,6 +520,68 @@ export default function PaymentInitiationPage() {
                   </span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
+                  </>
+                ) : (
+                  <>
+                <div className="p-4 rounded-2xl bg-sand-50 border border-stone-200/80 space-y-2 text-xs text-stone-700">
+                  <p className="font-semibold text-stone-900">
+                    Transfer {formatNaira(activeChargeAmount)} to:
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <span>Account name</span>
+                    <span className="font-semibold text-stone-900">
+                      {realtorConfig.bankTransferBeneficiaryName}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Bank</span>
+                    <span className="font-semibold text-stone-900">
+                      {realtorConfig.bankTransferBankName}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Account number</span>
+                    <span className="font-mono font-bold text-stone-900">
+                      {realtorConfig.bankTransferAccountNumber}
+                    </span>
+                  </div>
+                  <p className="text-stone-500 pt-1">
+                    Use <strong>{ref}</strong> as the transfer narration. The amount is added to
+                    your booking once our team verifies the receipt.
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="transferReceipt"
+                    className="block text-xs font-semibold text-stone-700 mb-1.5"
+                  >
+                    Upload transfer receipt
+                  </label>
+                  <input
+                    id="transferReceipt"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,application/pdf"
+                    onChange={(e) => setTransferFile(e.target.files?.[0] || null)}
+                    className="block w-full text-xs text-stone-700 file:mr-3 file:px-4 file:py-2 file:rounded-xl file:border-0 file:bg-stone-900 file:text-white file:text-xs file:font-semibold"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isSubmittingTransfer}
+                  onClick={handleSubmitTransfer}
+                  className="w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-2xl bg-brand-800 hover:bg-brand-900 text-white text-sm font-bold transition-colors shadow-sm disabled:opacity-50"
+                >
+                  <Landmark className="w-4 h-4" />
+                  <span>
+                    {isSubmittingTransfer
+                      ? 'Uploading receipt...'
+                      : `Submit Transfer Receipt (${formatNaira(activeChargeAmount)})`}
+                  </span>
+                </button>
+                  </>
+                )}
               </div>
             ) : (
               /* Step 2: Interactive Paystack Test Checkout Widget */

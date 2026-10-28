@@ -265,6 +265,7 @@ export function buildCustomerBookingVerifiedView(
     booking.status !== 'Expired' &&
     booking.paymentStatus !== 'Paid' &&
     booking.paymentStatus !== 'AwaitingVerification' &&
+    booking.receiptVerificationStatus !== 'PendingReview' &&
     balanceAmount > 0 &&
     (booking.paymentPolicySnapshot !== 'PayAfterApproval' || booking.status === 'Confirmed');
 

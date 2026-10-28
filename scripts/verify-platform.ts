@@ -15,6 +15,7 @@ import {
   uploadBankTransferReceipt,
   submitBankTransferCheckout,
   getPrivateReceiptRecord,
+  submitBookingTransferPayment,
 } from '../src/server/services/checkoutService';
 import {
   verifyBookingWithCode,
@@ -344,6 +345,71 @@ async function runVerificationSuite() {
   console.log(
     `✅ [Scenario 3] Bank transfer booking ${transferBooking.bookingReference} created (PendingApproval, AwaitingVerification, PendingReview). Private receipt stored securely.`
   );
+
+  // =========================================================================
+  // SCENARIO 3b: BANK TRANSFER PART PAYMENT + BALANCE BY TRANSFER
+  // =========================================================================
+  console.log('\n--- Scenario 3b: Bank Transfer Part Payment ---');
+  const partTransferCheckout = createBookingCheckoutAttempt({
+    apartmentId: 'apt-3',
+    guestName: 'Transfer Part Payer',
+    guestEmail: 'transfer.part@example.com',
+    guestPhone: '+234 803 555 0222',
+    checkIn: '2027-04-01',
+    checkOut: '2027-04-04',
+    guests: 1,
+    paymentMethod: 'BankTransfer',
+  });
+  assert.equal(partTransferCheckout.ok, true);
+  if (!partTransferCheckout.ok) throw new Error('Transfer checkout failed');
+  const ptTotal = partTransferCheckout.checkout.totalAmount;
+  const ptFirst = Math.ceil(ptTotal * 0.5);
+  const ptUpload = uploadBankTransferReceipt(partTransferCheckout.checkout.id, {
+    originalFilename: 'first_transfer.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 2000,
+    base64Data: Buffer.from('%PDF-1.4 first part transfer').toString('base64'),
+  });
+  assert.equal(ptUpload.ok, true);
+  if (!ptUpload.ok) throw new Error('Upload failed');
+  const ptSubmit = submitBankTransferCheckout({
+    checkoutAttemptId: partTransferCheckout.checkout.id,
+    receiptKey: ptUpload.receiptKey,
+    transferAmount: ptFirst,
+  });
+  assert.equal(ptSubmit.ok, true);
+  if (!ptSubmit.ok) throw new Error('Submit failed');
+  assert.equal(ptSubmit.payment.amount, ptFirst, 'Transfer payment records the declared amount');
+  assert.equal(ptSubmit.booking.amountPaid, 0, 'Nothing is credited before admin review');
+
+  const ptVerify = reviewBankTransferReceipt(adminId, ptSubmit.booking.id, 'VERIFY');
+  assert.equal(ptVerify.ok, true);
+  if (!ptVerify.ok) throw new Error('Verify failed');
+  assert.equal(ptVerify.booking.amountPaid, ptFirst);
+  assert.equal(ptVerify.booking.paymentStatus, 'Partially Paid');
+  assert.equal(ptVerify.booking.status, 'PendingApproval');
+
+  const ptReceipt = {
+    filename: 'balance_transfer.png',
+    mimeType: 'image/png',
+    sizeBytes: 1500,
+    base64Data: Buffer.from('fake png balance receipt').toString('base64'),
+  };
+  const ptBalance = submitBookingTransferPayment({ bookingId: ptSubmit.booking.id, ...ptReceipt });
+  assert.equal(ptBalance.ok, true);
+  if (!ptBalance.ok) throw new Error('Balance transfer failed');
+  assert.equal(ptBalance.payment.amount, ptTotal - ptFirst, 'Default balance transfer is the full balance');
+  const ptDuplicate = submitBookingTransferPayment({ bookingId: ptSubmit.booking.id, ...ptReceipt });
+  assert.equal(ptDuplicate.ok, false, 'Only one transfer can be under review at a time');
+
+  const ptVerifyBalance = reviewBankTransferReceipt(adminId, ptSubmit.booking.id, 'VERIFY');
+  assert.equal(ptVerifyBalance.ok, true);
+  if (!ptVerifyBalance.ok) throw new Error('Balance verify failed');
+  assert.equal(ptVerifyBalance.booking.amountPaid, ptTotal);
+  assert.equal(ptVerifyBalance.booking.paymentStatus, 'Paid');
+  const ptNothingPending = reviewBankTransferReceipt(adminId, ptSubmit.booking.id, 'VERIFY');
+  assert.equal(ptNothingPending.ok, false, 'Verifying twice must not double-credit');
+  console.log(`✅ [Scenario 3b] Transfer part payment ${ptFirst} of ${ptTotal} verified, balance paid by transfer.`);
 
   // =========================================================================
   // SCENARIO 4: BANK TRANSFER APPROVAL RULES

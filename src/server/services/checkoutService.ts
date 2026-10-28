@@ -13,6 +13,7 @@ import {
 } from '@/types';
 import { calculateNights, generateBookingReference } from '@/lib/utils';
 import { hasBookingConflict, hasBlockedDateConflict } from '@/lib/availability';
+import { resolvePaymentAmount } from '@/lib/payments';
 import {
   findOrCreateCustomerInTransaction,
   issueBookingVerificationCredentialInTransaction,
@@ -344,6 +345,8 @@ export interface SubmitBankTransferCheckoutInput {
   checkoutId?: string;
   checkoutAttemptId?: string;
   receiptKey?: string;
+  /** Amount (NGN) the guest says they transferred; omit for the full total. */
+  transferAmount?: number | null;
   guestName?: string;
   guestEmail?: string;
   guestPhone?: string;
@@ -430,6 +433,16 @@ export function submitBankTransferCheckout(
         error: 'Uploaded receipt could not be located in private storage.',
         status: 400 as const,
       };
+    }
+
+    const transfer = resolvePaymentAmount({
+      totalPrice: checkout.totalAmount,
+      amountAlreadyPaid: 0,
+      depositPercentage: db.realtorConfig.depositPercentage,
+      requestedAmount: input.transferAmount,
+    });
+    if (!transfer.ok) {
+      return { ok: false as const, error: transfer.error, status: 400 as const };
     }
 
     const guestName = input.guestName?.trim() || checkout.guestName;
@@ -562,10 +575,10 @@ export function submitBankTransferCheckout(
       providerReference: `TRF_${bookingReference.replace(/[^A-Z0-9]/gi, '')}_${Date.now().toString(36).toUpperCase()}`,
       authorizationUrl: '',
       accessCode: '',
-      amount: newBooking.totalPrice,
-      amountKobo: Math.round(newBooking.totalPrice * 100),
+      amount: transfer.amount,
+      amountKobo: Math.round(transfer.amount * 100),
       currency: 'NGN',
-      paymentType: 'BankTransfer',
+      paymentType: transfer.isPartPayment ? 'PartPayment' : 'BankTransfer',
       status: 'AwaitingVerification',
       paymentStatus: 'AwaitingVerification',
       receiptVerificationStatus: 'PendingReview',
@@ -639,6 +652,7 @@ export function submitBankTransferCheckout(
         checkoutId: checkout.id,
         receiptStorageKey: checkout.receiptStorageKey,
         totalAmount: newBooking.totalAmount,
+        transferAmount: transfer.amount,
       }),
       createdAt: nowIso,
     });
@@ -650,6 +664,167 @@ export function submitBankTransferCheckout(
       devModeVerificationCode: issuedCredential.notification.devModeCodePreview,
       idempotentReplay: false,
       message: `Booking ${newBooking.bookingReference} submitted. Transfer receipt is Pending Review and booking is Pending Approval.`,
+    };
+  });
+}
+
+/**
+ * A verified guest pays (part of) their outstanding balance by bank transfer:
+ * stores the receipt privately and records a payment awaiting admin review.
+ * The amount is only credited to the booking once the admin verifies it.
+ */
+export function submitBookingTransferPayment(input: {
+  bookingId: string;
+  transferAmount?: number | null;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  base64Data: string;
+}):
+  | { ok: true; booking: Booking; payment: PaymentRecord; message: string }
+  | { ok: false; error: string; status: 400 | 404 | 409 } {
+  const normMime = input.mimeType?.toLowerCase().trim() || '';
+  if (!ALLOWED_RECEIPT_MIME_TYPES.has(normMime)) {
+    return {
+      ok: false,
+      error: 'Invalid receipt file format. Allowed formats: PNG, JPG/JPEG, WEBP, and PDF.',
+      status: 400,
+    };
+  }
+  if (input.sizeBytes <= 0 || input.sizeBytes > MAX_RECEIPT_FILE_SIZE_BYTES) {
+    return { ok: false, error: 'Receipt file exceeds the maximum allowed size of 5 MB.', status: 400 };
+  }
+  if (!input.base64Data || input.base64Data.length < 10) {
+    return { ok: false, error: 'Receipt file payload is empty or invalid.', status: 400 };
+  }
+
+  return withDatabaseTransaction((db) => {
+    const booking = db.bookings.find((b) => b.id === input.bookingId);
+    if (!booking) {
+      return { ok: false as const, error: 'Booking not found.', status: 404 as const };
+    }
+    if (['Cancelled', 'Rejected', 'Expired', 'Completed'].includes(booking.status)) {
+      return {
+        ok: false as const,
+        error: `Payments can't be made on a ${booking.status.toLowerCase()} booking.`,
+        status: 409 as const,
+      };
+    }
+    const hasPendingTransfer = db.payments.some(
+      (p) =>
+        p.bookingId === booking.id &&
+        p.paymentMethod === 'BankTransfer' &&
+        p.receiptVerificationStatus === 'PendingReview'
+    );
+    if (hasPendingTransfer) {
+      return {
+        ok: false as const,
+        error:
+          'Your previous transfer receipt is still being reviewed. You can make another payment once it has been checked.',
+        status: 409 as const,
+      };
+    }
+
+    const amountPaid = booking.amountPaid ?? 0;
+    const transfer = resolvePaymentAmount({
+      totalPrice: booking.totalPrice,
+      amountAlreadyPaid: amountPaid,
+      depositPercentage: db.realtorConfig.depositPercentage,
+      requestedAmount: input.transferAmount,
+    });
+    if (!transfer.ok) {
+      return { ok: false as const, error: transfer.error, status: 400 as const };
+    }
+
+    const nowIso = new Date().toISOString();
+    const safeFilename = input.filename?.trim() || 'transfer-receipt.png';
+    const cleanExt = safeFilename.split('.').pop()?.toLowerCase() || 'png';
+    const storageKey = `rcpt-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}.${cleanExt}`;
+
+    db.privateReceipts.unshift({
+      storageKey,
+      checkoutId: booking.checkoutAttemptId || '',
+      bookingId: booking.id,
+      bookingReference: booking.bookingReference,
+      customerId: booking.customerId || null,
+      originalFilename: safeFilename,
+      mimeType: normMime,
+      sizeBytes: input.sizeBytes,
+      base64Data: input.base64Data,
+      uploadedByEmail: booking.guestEmail,
+      createdAt: nowIso,
+    });
+
+    const ref = `TRF_${booking.bookingReference.replace(/[^A-Z0-9]/gi, '')}_${Date.now().toString(36).toUpperCase()}`;
+    const payment: PaymentRecord = {
+      id: `pay-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      clientId: db.realtorConfig.clientId,
+      bookingId: booking.id,
+      bookingReference: booking.bookingReference,
+      customerId: booking.customerId || '',
+      paymentMethod: 'BankTransfer',
+      provider: 'BankTransfer',
+      mode: 'BANK_TRANSFER_RECEIPT',
+      reference: ref,
+      providerReference: ref,
+      authorizationUrl: '',
+      accessCode: '',
+      amount: transfer.amount,
+      amountKobo: Math.round(transfer.amount * 100),
+      currency: 'NGN',
+      paymentType: transfer.isPartPayment ? 'PartPayment' : amountPaid > 0 ? 'Balance' : 'BankTransfer',
+      status: 'AwaitingVerification',
+      paymentStatus: 'AwaitingVerification',
+      receiptVerificationStatus: 'PendingReview',
+      receiptStorageKey: storageKey,
+      receiptOriginalFilename: safeFilename,
+      receiptMimeType: normMime,
+      verifiedByUserId: null,
+      verifiedAt: null,
+      rejectionReason: null,
+      channel: 'bank_transfer',
+      gatewayResponse: 'Receipt uploaded by customer; awaiting administrator verification.',
+      paidAt: null,
+      rawResponseSummary: JSON.stringify({ storageKey, balancePayment: true }),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    db.payments.unshift(payment);
+
+    booking.receiptVerificationStatus = 'PendingReview';
+    booking.receiptStorageKey = storageKey;
+    booking.receiptOriginalFilename = safeFilename;
+    booking.receiptMimeType = normMime;
+    if (amountPaid === 0) booking.paymentStatus = 'AwaitingVerification';
+    booking.updatedAt = nowIso;
+    booking.statusHistory.push({
+      status: booking.status,
+      timestamp: nowIso,
+      note: `Bank transfer receipt for NGN ${transfer.amount.toLocaleString()} uploaded; awaiting admin review.`,
+    });
+
+    db.auditLogs.unshift({
+      id: `aud-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+      clientId: db.realtorConfig.clientId,
+      actorUserId: booking.customerId || 'customer',
+      actorEmail: booking.guestEmail,
+      actorRole: 'CUSTOMER',
+      action: 'SUBMIT_BALANCE_TRANSFER_RECEIPT',
+      targetType: 'TRANSFER_RECEIPT',
+      targetId: payment.id,
+      metadataJson: JSON.stringify({
+        bookingReference: booking.bookingReference,
+        amount: transfer.amount,
+        storageKey,
+      }),
+      createdAt: nowIso,
+    });
+
+    return {
+      ok: true as const,
+      booking,
+      payment,
+      message: `Receipt for NGN ${transfer.amount.toLocaleString()} received. We'll verify it and update your balance.`,
     };
   });
 }

@@ -7,8 +7,8 @@ export async function POST(request: NextRequest) {
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
-      const checkoutId = formData.get('checkoutId') as string;
-      const file = formData.get('file') as File;
+      const checkoutId = (formData.get('checkoutId') || formData.get('checkoutAttemptId')) as string;
+      const file = (formData.get('file') || formData.get('receipt')) as File;
       const uploaderEmail = formData.get('uploaderEmail') as string | undefined;
 
       if (!checkoutId || !file) {

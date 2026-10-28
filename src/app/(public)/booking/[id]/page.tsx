@@ -151,7 +151,7 @@ function BookingFormContent() {
     amountAlreadyPaid: 0,
     depositPercentage: realtorConfig.depositPercentage,
   });
-  const isPartPayment = paymentMethod === 'Paystack' && payOption === 'part';
+  const isPartPayment = payOption === 'part';
   const chargeNow = isPartPayment ? Number(partAmount) || 0 : totalDue;
 
   const validateForm = () => {
@@ -354,7 +354,11 @@ function BookingFormContent() {
 
       // 3. Finalize bank transfer submission
       setSubmissionStep('3/3 Finalizing booking submission & issuing access code...');
-      const submitRes = await submitBankTransferCheckout(checkoutAttemptId, receiptKey);
+      const submitRes = await submitBankTransferCheckout(
+        checkoutAttemptId,
+        receiptKey,
+        isPartPayment ? Math.round(Number(partAmount)) : undefined
+      );
 
       if (!submitRes.success) {
         if (submitRes.conflictResolution) {
@@ -767,6 +771,89 @@ function BookingFormContent() {
             </div>
 
             {/* Conditional Flow: Bank Transfer Details & Upload */}
+            {/* Amount to pay now: full or part (Paystack and bank transfer) */}
+            <div className="p-4 rounded-2xl bg-white border border-stone-200/90 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-700">
+                  How much do you want to pay now?
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label
+                    className={`p-3 rounded-xl border cursor-pointer text-sm ${
+                      payOption === 'full'
+                        ? 'border-brand-700 bg-brand-50/60'
+                        : 'border-stone-200 hover:border-stone-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="payOption"
+                      className="sr-only"
+                      checked={payOption === 'full'}
+                      onChange={() => setPayOption('full')}
+                    />
+                    <span className="block font-semibold text-stone-900">Pay in full</span>
+                    <span className="block text-xs text-stone-600 mt-0.5">
+                      {formatNaira(totalDue)} now
+                    </span>
+                  </label>
+                  <label
+                    className={`p-3 rounded-xl border cursor-pointer text-sm ${
+                      payOption === 'part'
+                        ? 'border-brand-700 bg-brand-50/60'
+                        : 'border-stone-200 hover:border-stone-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="payOption"
+                      className="sr-only"
+                      checked={payOption === 'part'}
+                      onChange={() => {
+                        setPayOption('part');
+                        if (!partAmount) setPartAmount(String(paymentLimits.minAmount));
+                      }}
+                    />
+                    <span className="block font-semibold text-stone-900">Part payment</span>
+                    <span className="block text-xs text-stone-600 mt-0.5">
+                      From {formatNaira(paymentLimits.minAmount)} now, balance later
+                    </span>
+                  </label>
+                </div>
+                {payOption === 'part' && (
+                  <div>
+                    <label
+                      htmlFor="partAmount"
+                      className="block text-xs font-semibold text-stone-700 mb-1.5"
+                    >
+                      Amount to pay now (₦)
+                    </label>
+                    <input
+                      id="partAmount"
+                      type="number"
+                      inputMode="numeric"
+                      min={paymentLimits.minAmount}
+                      max={paymentLimits.maxAmount}
+                      step={1}
+                      value={partAmount}
+                      onChange={(e) => setPartAmount(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-stone-300 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
+                    />
+                    {errors.partAmount ? (
+                      <p className="text-xs text-red-600 mt-1.5">{errors.partAmount}</p>
+                    ) : (
+                      <p className="text-xs text-stone-500 mt-1.5">
+                        Minimum {formatNaira(paymentLimits.minAmount)} (
+                        {realtorConfig.depositPercentage}% of the total). Remaining balance:{' '}
+                        {formatNaira(Math.max(0, totalDue - (Number(partAmount) || 0)))} — pay
+                        it any time from My Booking.
+                        {paymentMethod === 'BankTransfer' &&
+                          ' Transfer exactly this amount and upload its receipt below.'}
+                      </p>
+                    )}
+                  </div>
+                )}
+            </div>
+
             {paymentMethod === 'BankTransfer' && (
               <div className="space-y-4 pt-2">
                 {/* Bank Account Details Card */}
@@ -777,7 +864,7 @@ function BookingFormContent() {
                       Realtor Bank Account Details
                     </span>
                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-800 text-white">
-                      Amount: {formatNaira(totalDue)}
+                      Amount to transfer: {formatNaira(chargeNow)}
                     </span>
                   </div>
 
@@ -908,88 +995,6 @@ function BookingFormContent() {
 
             {/* Conditional Flow: Paystack Notice */}
             {paymentMethod === 'Paystack' && (
-              <div className="p-4 rounded-2xl bg-white border border-stone-200/90 space-y-3">
-                <p className="text-xs font-bold uppercase tracking-wider text-stone-700">
-                  How much do you want to pay now?
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label
-                    className={`p-3 rounded-xl border cursor-pointer text-sm ${
-                      payOption === 'full'
-                        ? 'border-brand-700 bg-brand-50/60'
-                        : 'border-stone-200 hover:border-stone-300'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="payOption"
-                      className="sr-only"
-                      checked={payOption === 'full'}
-                      onChange={() => setPayOption('full')}
-                    />
-                    <span className="block font-semibold text-stone-900">Pay in full</span>
-                    <span className="block text-xs text-stone-600 mt-0.5">
-                      {formatNaira(totalDue)} now
-                    </span>
-                  </label>
-                  <label
-                    className={`p-3 rounded-xl border cursor-pointer text-sm ${
-                      payOption === 'part'
-                        ? 'border-brand-700 bg-brand-50/60'
-                        : 'border-stone-200 hover:border-stone-300'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="payOption"
-                      className="sr-only"
-                      checked={payOption === 'part'}
-                      onChange={() => {
-                        setPayOption('part');
-                        if (!partAmount) setPartAmount(String(paymentLimits.minAmount));
-                      }}
-                    />
-                    <span className="block font-semibold text-stone-900">Part payment</span>
-                    <span className="block text-xs text-stone-600 mt-0.5">
-                      From {formatNaira(paymentLimits.minAmount)} now, balance later
-                    </span>
-                  </label>
-                </div>
-                {payOption === 'part' && (
-                  <div>
-                    <label
-                      htmlFor="partAmount"
-                      className="block text-xs font-semibold text-stone-700 mb-1.5"
-                    >
-                      Amount to pay now (₦)
-                    </label>
-                    <input
-                      id="partAmount"
-                      type="number"
-                      inputMode="numeric"
-                      min={paymentLimits.minAmount}
-                      max={paymentLimits.maxAmount}
-                      step={1}
-                      value={partAmount}
-                      onChange={(e) => setPartAmount(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-stone-300 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
-                    />
-                    {errors.partAmount ? (
-                      <p className="text-xs text-red-600 mt-1.5">{errors.partAmount}</p>
-                    ) : (
-                      <p className="text-xs text-stone-500 mt-1.5">
-                        Minimum {formatNaira(paymentLimits.minAmount)} (
-                        {realtorConfig.depositPercentage}% of the total). Remaining balance:{' '}
-                        {formatNaira(Math.max(0, totalDue - (Number(partAmount) || 0)))} — pay
-                        it any time from My Booking.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {paymentMethod === 'Paystack' && (
               <div className="p-4 rounded-2xl bg-sand-50 border border-stone-200/90 text-xs text-stone-700 space-y-2">
                 <div className="flex items-start gap-2.5">
                   <ShieldCheck className="w-4 h-4 text-brand-700 shrink-0 mt-0.5" />
@@ -1046,7 +1051,7 @@ function BookingFormContent() {
               ) : (
                 <>
                   <Send className="w-4 h-4" />
-                  <span>Submit Transfer & Booking Request ({formatNaira(totalDue)})</span>
+                  <span>Submit Transfer & Booking Request ({formatNaira(chargeNow)})</span>
                 </>
               )}
             </button>
