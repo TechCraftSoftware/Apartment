@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {
   createInitialDatabaseState,
@@ -9,6 +10,13 @@ import { PlatformDatabaseSchema } from './schema';
 export function getDatabaseFilePath(): string {
   if (process.env.PLATFORM_DB_PATH) {
     return path.resolve(process.env.PLATFORM_DB_PATH);
+  }
+  // Vercel's deployment files are read-only; only the temp dir is writable.
+  // Each server instance starts from the clean seed there, and data does not
+  // survive cold starts or redeploys (demo use only — use a real database for
+  // production bookings).
+  if (process.env.VERCEL) {
+    return path.join(os.tmpdir(), 'platform-db.json');
   }
   return path.join(process.cwd(), 'data', 'platform-db.json');
 }
