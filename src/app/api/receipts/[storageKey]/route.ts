@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPrivateReceiptRecord } from '@/server/services/checkoutService';
-import { extractAdminIdFromHeaders } from '@/server/services/authService';
+import { getAdminFromRequest } from '@/server/services/authService';
 
 export async function GET(
   request: NextRequest,
@@ -8,12 +8,7 @@ export async function GET(
 ) {
   try {
     const { storageKey } = await params;
-    const actorUserId =
-      request.headers.get('x-platform-user-id') ||
-      request.headers.get('x-actor-user-id') ||
-      request.nextUrl.searchParams.get('actorUserId') ||
-      extractAdminIdFromHeaders(request.headers) ||
-      undefined;
+    const actorUserId = getAdminFromRequest(request)?.id;
     const sessionToken =
       request.headers.get('x-booking-access-token') ||
       request.headers.get('x-booking-session-token') ||

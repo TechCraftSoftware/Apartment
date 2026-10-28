@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
-import { loginAdminUser } from '@/server/services/authService';
+import {
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_TTL_SECONDS,
+  createAdminSession,
+  loginAdminUser,
+} from '@/server/services/authService';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,16 +17,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
+    const session = createAdminSession(result.user.id);
+
     const response = NextResponse.json({
       ok: true,
       user: result.user,
     });
 
-    response.cookies.set('verdant_session_user', result.user.id, {
-      httpOnly: false,
+    response.cookies.set(ADMIN_SESSION_COOKIE, session.token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
       path: '/',
-      maxAge: 60 * 60 * 24 * 7,
+      maxAge: ADMIN_SESSION_TTL_SECONDS,
     });
+    // Remove the legacy cookie that carried the raw admin user id.
+    response.cookies.delete('verdant_session_user');
 
     return response;
   } catch (err) {

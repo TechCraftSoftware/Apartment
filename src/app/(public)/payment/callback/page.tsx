@@ -13,6 +13,7 @@ import {
   CreditCard,
 } from 'lucide-react';
 import { useBookingContext } from '@/context/BookingContext';
+import { storeBookingAccessToken } from '@/lib/bookingAccessClient';
 import {
   BookingStatusBadge,
   PaymentStatusBadge,
@@ -31,7 +32,8 @@ interface VerificationResponse {
 
 function PaymentCallbackContent() {
   const searchParams = useSearchParams();
-  const { refreshPlatformState, addToast } = useBookingContext();
+  const { refreshPlatformState, addToast, recordDevVerificationCode } =
+    useBookingContext();
 
   const reference =
     searchParams.get('reference') || searchParams.get('trxref') || '';
@@ -79,6 +81,13 @@ function PaymentCallbackContent() {
           return;
         }
 
+        storeBookingAccessToken(data.bookingAccessToken);
+        if (data.devModeVerificationCode && data.booking?.bookingReference) {
+          recordDevVerificationCode(
+            data.booking.bookingReference,
+            data.devModeVerificationCode
+          );
+        }
         setResult(data);
         await refreshPlatformState();
 
@@ -97,7 +106,15 @@ function PaymentCallbackContent() {
         setIsVerifying(false);
       }
     },
-    [reference, bookingId, outcome, channel, refreshPlatformState, addToast]
+    [
+      reference,
+      bookingId,
+      outcome,
+      channel,
+      refreshPlatformState,
+      addToast,
+      recordDevVerificationCode,
+    ]
   );
 
   useEffect(() => {

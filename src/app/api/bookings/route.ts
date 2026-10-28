@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createCustomerBookingRequest } from '@/server/services/marketplaceService';
+import {
+  createCustomerBookingRequest,
+  pickPublicBookingInput,
+} from '@/server/services/marketplaceService';
 import { deliverQueuedBookingEmails } from '@/server/services/emailService';
 
 export const dynamic = 'force-dynamic';
@@ -7,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const result = createCustomerBookingRequest(body);
+    const result = createCustomerBookingRequest(pickPublicBookingInput(body));
     await deliverQueuedBookingEmails();
 
     if (!result.ok) {

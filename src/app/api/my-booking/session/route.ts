@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getVerifiedBookingBySessionToken } from '@/server/services/customerAndVerificationService';
+import {
+  getVerifiedBookingBySessionToken,
+  toGuestBooking,
+} from '@/server/services/customerAndVerificationService';
 import { cancelBookingByVerifiedCustomer } from '@/server/services/marketplaceService';
 
 export const dynamic = 'force-dynamic';
@@ -39,6 +42,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       booking: result.booking,
+      guestBooking: toGuestBooking(result.rawBooking),
     });
   } catch (err) {
     return NextResponse.json(

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { submitBankTransferCheckout } from '@/server/services/checkoutService';
 import { deliverQueuedBookingEmails } from '@/server/services/emailService';
+import {
+  issueBookingAccessSession,
+  toGuestBooking,
+} from '@/server/services/customerAndVerificationService';
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +19,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(result);
+    const access =
+      !result.idempotentReplay && result.booking
+        ? issueBookingAccessSession(result.booking.id)
+        : null;
+
+    return NextResponse.json({
+      ...result,
+      booking: result.booking ? toGuestBooking(result.booking) : result.booking,
+      bookingAccessToken: access?.sessionToken ?? null,
+      bookingAccessExpiresAt: access?.sessionExpiresAt ?? null,
+    });
   } catch (err: any) {
     return NextResponse.json(
       { error: err.message || 'Failed to submit bank transfer booking.' },

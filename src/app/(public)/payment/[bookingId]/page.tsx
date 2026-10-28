@@ -18,6 +18,10 @@ import {
 } from 'lucide-react';
 import { useBookingContext } from '@/context/BookingContext';
 import {
+  getStoredBookingAccessToken,
+  useGuestBooking,
+} from '@/lib/bookingAccessClient';
+import {
   BookingStatusBadge,
   PaymentStatusBadge,
 } from '@/components/ui/BookingStatusBadge';
@@ -52,12 +56,18 @@ export default function PaymentInitiationPage() {
   } = useBookingContext();
 
   const bookingId = params?.bookingId || '';
-  const booking = bookings.find(
-    (b) =>
-      b.id === bookingId ||
-      b.reference === bookingId ||
-      b.bookingReference === bookingId
-  );
+  // Guests load only the booking their access session unlocks; signed-in
+  // admins can fall back to the records they already hold.
+  const { booking: guestBooking, isLoading: isGuestBookingLoading } =
+    useGuestBooking(bookingId);
+  const booking =
+    guestBooking ||
+    bookings.find(
+      (b) =>
+        b.id === bookingId ||
+        b.reference === bookingId ||
+        b.bookingReference === bookingId
+    );
 
   const [paymentChoice, setPaymentChoice] = useState<'FullPayment' | 'Deposit'>(
     realtorConfig.paymentPolicy === 'Deposit' ? 'Deposit' : 'FullPayment'
@@ -70,7 +80,7 @@ export default function PaymentInitiationPage() {
   const [initializedPayment, setInitializedPayment] =
     useState<InitializedPaymentState | null>(null);
 
-  if (!isHydrated) {
+  if (!isHydrated || isGuestBookingLoading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-20">
         <LoadingState />
@@ -137,7 +147,7 @@ export default function PaymentInitiationPage() {
       <div className="max-w-3xl mx-auto px-4 py-20">
         <EmptyState
           title="Booking Not Found for Payment"
-          description="We could not locate a booking record matching this identifier."
+          description="We could not load this booking in this browser session. Verify your booking on My Booking first, then return to pay."
           actionLabel="Go to My Booking"
           onAction={() => router.push('/my-booking')}
         />
@@ -170,7 +180,10 @@ export default function PaymentInitiationPage() {
     try {
       const res = await fetch('/api/payments/initialize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-booking-access-token': getStoredBookingAccessToken() || '',
+        },
         body: JSON.stringify({
           bookingId: booking.id,
           paymentChoice: amountPaid > 0 ? 'Balance' : paymentChoice,

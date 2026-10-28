@@ -21,8 +21,6 @@ import {
   ToastMessage,
 } from '@/types';
 import {
-  createInitialBlocks,
-  createInitialBookings,
   DEFAULT_REALTOR_CLIENT_CONFIG,
   INITIAL_APARTMENTS,
 } from '@/lib/seed-data';
@@ -45,9 +43,9 @@ import type {
   PaymentRecord,
   PropertyRecord,
 } from '@/server/db/schema';
+import { storeBookingAccessToken } from '@/lib/bookingAccessClient';
 
 const STORAGE_KEYS = {
-  ADMIN_AUTH: 'verdant_stays_admin_auth_v1',
   DEV_CODES: 'verdant_stays_dev_verification_codes_v1',
 };
 
@@ -98,8 +96,9 @@ interface BookingContextValue {
   addToast: (toast: Omit<ToastMessage, 'id'>) => void;
   removeToast: (id: string) => void;
   // Admin Auth
-  loginAdmin: (email: string, password: string) => { success: boolean; error?: string };
-  logoutAdmin: () => void;
+  loginAdmin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logoutAdmin: () => Promise<void>;
+  recordDevVerificationCode: (bookingRef: string, rawCode: string | null | undefined) => void;
   // Platform State Refresh
   refreshPlatformState: () => Promise<void>;
   // Realtor Config
@@ -245,10 +244,12 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       updatedAt: new Date().toISOString(),
     }))
   );
-  const [bookings, setBookings] = useState<Booking[]>(createInitialBookings());
-  const [blocks, setBlocks] = useState<AvailabilityBlock[]>(
-    createInitialBlocks()
-  );
+  // Bookings, blocks and other private records only arrive with an admin session.
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [blocks, setBlocks] = useState<AvailabilityBlock[]>([]);
+  const [serverPublicIntervals, setServerPublicIntervals] = useState<
+    PublicBookedInterval[]
+  >([]);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
@@ -303,7 +304,24 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       payments?: PaymentRecord[];
       notifications?: NotificationRecord[];
       auditLogs?: AuditLogRecord[];
+      currentUser?: { id: string } | null;
+      publicOccupiedIntervals?: PublicBookedInterval[];
     }) => {
+      if ('currentUser' in data) {
+        const isAdmin = Boolean(data.currentUser);
+        setIsAdminAuthenticated(isAdmin);
+        if (!isAdmin) {
+          setBookings([]);
+          setBlocks([]);
+          setCustomers([]);
+          setPayments([]);
+          setNotifications([]);
+          setAuditLogs([]);
+        }
+      }
+      if (data.publicOccupiedIntervals) {
+        setServerPublicIntervals(data.publicOccupiedIntervals);
+      }
       if (data.realtorConfig) setRealtorConfig(data.realtorConfig);
       if (data.properties) setProperties(data.properties);
       if (data.apartments) setApartments(data.apartments);
@@ -348,10 +366,6 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const rawAdminAuth = localStorage.getItem(STORAGE_KEYS.ADMIN_AUTH);
-      if (rawAdminAuth === 'true') {
-        setIsAdminAuthenticated(true);
-      }
       try {
         const storedCodes = sessionStorage.getItem(STORAGE_KEYS.DEV_CODES);
         if (storedCodes) {
@@ -365,40 +379,38 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     });
   }, [refreshPlatformState]);
 
-  const loginAdmin = (email: string, password: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail === 'admin@staydemo.com' && password === 'Admin123!') {
-      setIsAdminAuthenticated(true);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, 'true');
-      }
-      fetch('/api/auth/login', {
+  const loginAdmin = async (email: string, password: string) => {
+    try {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanEmail,
-          password,
-        }),
-      }).catch(() => {});
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return {
+          success: false,
+          error: data.error || 'Invalid administrator email or password credentials.',
+        };
+      }
+      await refreshPlatformState();
       addToast({
         type: 'success',
         title: 'Signed in to Realtor Admin Dashboard',
         message: `Welcome back to ${realtorConfig.businessName}.`,
       });
       return { success: true };
+    } catch {
+      return { success: false, error: 'Network error while signing in.' };
     }
-    return {
-      success: false,
-      error:
-        'Invalid Realtor Admin credentials. Please use admin@staydemo.com and Admin123!',
-    };
   };
 
-  const logoutAdmin = () => {
-    setIsAdminAuthenticated(false);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(STORAGE_KEYS.ADMIN_AUTH);
-    }
+  const logoutAdmin = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    applyServerState({ currentUser: null });
+    await refreshPlatformState();
     addToast({
       type: 'info',
       title: 'Signed out',
@@ -412,11 +424,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-platform-user-id': 'usr-realtor-admin-1',
         },
         body: JSON.stringify({
           action: 'UPDATE_REALTOR_CONFIG',
-          actorUserId: 'usr-realtor-admin-1',
           config: updates,
         }),
       });
@@ -588,11 +598,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-platform-user-id': 'usr-realtor-admin-1',
         },
         body: JSON.stringify({
           action: 'CREATE_EXTERNAL_BOOKING',
-          actorUserId: 'usr-realtor-admin-1',
           booking: {
             apartmentId: input.apartmentId,
             guestName: input.guestName,
@@ -731,14 +739,17 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
           conflictResolution: data.conflictResolution,
         };
       }
-      if (data.devModeVerificationCode && data.bookingReference) {
-        recordDevCode(data.bookingReference, data.devModeVerificationCode);
+      const bookingReference: string | undefined =
+        data.bookingReference || data.booking?.bookingReference;
+      if (data.devModeVerificationCode && bookingReference) {
+        recordDevCode(bookingReference, data.devModeVerificationCode);
       }
+      storeBookingAccessToken(data.bookingAccessToken);
       await refreshPlatformState();
       return {
         success: true,
         booking: data.booking,
-        bookingReference: data.bookingReference,
+        bookingReference,
         devModeVerificationCode: data.devModeVerificationCode,
       };
     } catch {
@@ -759,7 +770,6 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-platform-user-id': 'usr-realtor-admin-1',
         },
         body: JSON.stringify({
           reviewAction,
@@ -848,11 +858,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-platform-user-id': 'usr-realtor-admin-1',
         },
         body: JSON.stringify({
           action: 'UPDATE_BOOKING_STATUS',
-          actorUserId: 'usr-realtor-admin-1',
           bookingId,
           status: newStatus,
           paymentStatus: newPaymentStatus,
@@ -897,11 +905,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-platform-user-id': 'usr-realtor-admin-1',
         },
         body: JSON.stringify({
           action: 'REISSUE_VERIFICATION_CODE',
-          actorUserId: 'usr-realtor-admin-1',
           bookingId,
         }),
       });
@@ -1009,11 +1015,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-platform-user-id': 'usr-realtor-admin-1',
       },
       body: JSON.stringify({
         action: 'SAVE_APARTMENT',
-        actorUserId: 'usr-realtor-admin-1',
         apartment: newApartment,
       }),
     })
@@ -1055,11 +1059,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-platform-user-id': 'usr-realtor-admin-1',
       },
       body: JSON.stringify({
         action: 'SAVE_APARTMENT',
-        actorUserId: 'usr-realtor-admin-1',
         apartment: updated,
       }),
     })
@@ -1112,11 +1114,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-platform-user-id': 'usr-realtor-admin-1',
       },
       body: JSON.stringify({
         action: 'DELETE_APARTMENT',
-        actorUserId: 'usr-realtor-admin-1',
         apartmentId: id,
       }),
     }).catch(() => {});
@@ -1205,11 +1205,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-platform-user-id': 'usr-realtor-admin-1',
       },
       body: JSON.stringify({
         action: 'ADD_BLOCKED_DATE',
-        actorUserId: 'usr-realtor-admin-1',
         blockedDate: newBlock,
       }),
     })
@@ -1236,11 +1234,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-platform-user-id': 'usr-realtor-admin-1',
       },
       body: JSON.stringify({
         action: 'REMOVE_BLOCKED_DATE',
-        actorUserId: 'usr-realtor-admin-1',
         blockId,
       }),
     })
@@ -1318,25 +1314,36 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'RESET_DEMO_DATA' }),
     })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
+      .then(async (r) => {
+        const d = await r.json().catch(() => null);
+        if (!r.ok) {
+          addToast({
+            type: 'error',
+            title: 'Demo Reset Failed',
+            message: d?.error || 'Only a signed-in Realtor Admin can reset demo data.',
+          });
+          return;
+        }
         if (d?.state) applyServerState(d.state);
+        setDevVerificationCodes(DEFAULT_SEEDED_CODES);
+        addToast({
+          type: 'success',
+          title: 'Demo Data Reset',
+          message:
+            'All sample properties, units, bookings, verification codes, and Paystack test records have been restored.',
+        });
       })
       .catch(() => {});
-
-    setDevVerificationCodes(DEFAULT_SEEDED_CODES);
-
-    addToast({
-      type: 'success',
-      title: 'Demo Data Reset',
-      message:
-        'All sample properties, units, bookings, verification codes, and Paystack test records have been restored.',
-    });
   };
 
+  // Admins derive intervals from the full records they hold; visitors use the
+  // neutral intervals the server computed for them.
   const publicOccupiedIntervals = useMemo(
-    () => buildPublicOccupiedIntervals(bookings, blocks),
-    [bookings, blocks]
+    () =>
+      isAdminAuthenticated
+        ? buildPublicOccupiedIntervals(bookings, blocks)
+        : serverPublicIntervals,
+    [isAdminAuthenticated, bookings, blocks, serverPublicIntervals]
   );
 
   return (
@@ -1360,6 +1367,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         removeToast,
         loginAdmin,
         logoutAdmin,
+        recordDevVerificationCode: recordDevCode,
         refreshPlatformState,
         updateRealtorConfig,
         createBooking,
