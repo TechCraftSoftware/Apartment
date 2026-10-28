@@ -394,8 +394,8 @@ function MyBookingContent() {
                 >
                   <CreditCard className="w-4 h-4" />
                   <span>
-                    Pay {formatNaira(verifiedBooking.balanceAmount)} with Paystack
-                    (Test Mode)
+                    {verifiedBooking.amountPaid > 0 ? 'Pay Balance' : 'Make Payment'} (
+                    {formatNaira(verifiedBooking.balanceAmount)} outstanding)
                   </span>
                   <ArrowRight className="w-4 h-4" />
                 </Link>

@@ -25,6 +25,7 @@ import {
   issueBookingVerificationCredentialInTransaction,
   getVerifiedBookingBySessionToken,
   buildCustomerBookingVerifiedView,
+  hasCustomerMadePayment,
 } from './customerAndVerificationService';
 import { isEmailDeliveryConfigured, queueBookingEmail } from './emailService';
 
@@ -726,11 +727,11 @@ export function cancelBookingByVerifiedCustomer(
       };
     }
 
-    if (booking.paymentStatus === 'Paid') {
+    if (hasCustomerMadePayment(booking)) {
       return {
         ok: false as const,
         error:
-          'Paid reservations require administrator review for cancellation and refund processing. Please contact our concierge.',
+          'This booking can no longer be cancelled online because a payment has been made. Please contact us for help.',
         status: 409 as const,
       };
     }

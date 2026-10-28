@@ -313,7 +313,7 @@ export default function AdminRealtorSettingsPage() {
                 type="text"
                 value={bankTransferBeneficiaryName}
                 onChange={(e) => setBankTransferBeneficiaryName(e.target.value)}
-                placeholder="e.g., Verdant Stays Hospitality Ltd"
+                placeholder="e.g., Ajani Apartment"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
               />
             </div>

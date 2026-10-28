@@ -76,7 +76,7 @@ function AdminLoginContent() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-stone-900">
-                Verdant Stays Admin
+                Ajani Apartment Admin
               </h1>
               <p className="text-xs text-stone-500 mt-0.5">
                 Sign in to manage apartments, availability & bookings

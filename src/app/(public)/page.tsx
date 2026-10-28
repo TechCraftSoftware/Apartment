@@ -39,7 +39,7 @@ export default function HomePage() {
         <div className="absolute inset-0 opacity-40">
           <Image
             src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=2000&q=80"
-            alt="Verdant Stays Luxury Residence"
+            alt="Ajani Apartment"
             fill
             priority
             className="object-cover"
@@ -209,7 +209,7 @@ export default function HomePage() {
               Transparent Reservation Workflow
             </span>
             <h2 className="font-serif text-3xl sm:text-4xl font-bold text-stone-900 mt-1.5">
-              How Booking with Verdant Stays Works
+              How Booking with Ajani Apartment Works
             </h2>
             <p className="text-sm text-stone-600 mt-2.5">
               Our reservation process protects guests from overlapping requests while

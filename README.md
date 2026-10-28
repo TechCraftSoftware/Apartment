@@ -2,7 +2,7 @@
 
 A full-stack **Single-Client Realtor Apartment Booking Platform** built with **Next.js (App Router)**, **TypeScript**, **Tailwind CSS**, and a modular server-side service architecture (`Properties`, `Availability`, `Bookings`, `Customers`, `Payments`, `Notifications`, `Administration`).
 
-Designed and operated for **one realtor client** (`Verdant Stays Lagos`, `clientId: realtor-verdant-stays`), while maintaining clean tenant/client boundaries so future realtor clients and isolated domains can be provisioned without rewriting core booking or availability logic.
+Designed and operated for **one realtor client** (`Ajani Apartment Lagos`, `clientId: realtor-verdant-stays`), while maintaining clean tenant/client boundaries so future realtor clients and isolated domains can be provisioned without rewriting core booking or availability logic.
 
 ---
 

@@ -17,7 +17,7 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: 'Verdant Stays | Luxury Serviced Apartments & Availability Management',
+  title: 'Ajani Apartment | Luxury Serviced Apartments & Availability Management',
   description:
     'Discover curated short-stay apartments in Lagos and Abuja, check real-time availability, and manage reservations.',
 };

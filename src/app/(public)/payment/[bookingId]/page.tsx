@@ -21,6 +21,7 @@ import {
   getStoredBookingAccessToken,
   useGuestBooking,
 } from '@/lib/bookingAccessClient';
+import { getPaymentLimits } from '@/lib/payments';
 import {
   BookingStatusBadge,
   PaymentStatusBadge,
@@ -69,9 +70,9 @@ export default function PaymentInitiationPage() {
         b.bookingReference === bookingId
     );
 
-  const [paymentChoice, setPaymentChoice] = useState<'FullPayment' | 'Deposit'>(
-    realtorConfig.paymentPolicy === 'Deposit' ? 'Deposit' : 'FullPayment'
-  );
+  // Pay the whole outstanding balance, or a part payment of a chosen amount.
+  const [payOption, setPayOption] = useState<'full' | 'part'>('full');
+  const [partAmount, setPartAmount] = useState('');
   const [selectedChannel, setSelectedChannel] = useState<
     'card' | 'bank_transfer' | 'ussd'
   >('card');
@@ -161,20 +162,27 @@ export default function PaymentInitiationPage() {
   const totalAmount = booking.totalPrice || booking.totalAmount;
   const amountPaid = booking.amountPaid ?? 0;
   const remainingBalance = Math.max(0, totalAmount - amountPaid);
-  const depositAmount =
-    booking.depositRequiredAmount ||
-    Math.round((totalAmount * (realtorConfig.depositPercentage || 50)) / 100);
+  const paymentLimits = getPaymentLimits({
+    totalPrice: totalAmount,
+    amountAlreadyPaid: amountPaid,
+    depositPercentage: realtorConfig.depositPercentage,
+  });
+  const partAmountNumber = Math.round(Number(partAmount) || 0);
+  const isPartAmountValid =
+    partAmountNumber >= paymentLimits.minAmount &&
+    partAmountNumber <= paymentLimits.maxAmount;
 
-  const activeChargeAmount =
-    amountPaid > 0
-      ? remainingBalance
-      : paymentChoice === 'Deposit'
-        ? depositAmount
-        : totalAmount;
+  const activeChargeAmount = payOption === 'part' ? partAmountNumber : remainingBalance;
   const activeChargeKobo = Math.round(activeChargeAmount * 100);
 
   const handleInitializePaystack = async () => {
     setInitError(null);
+    if (payOption === 'part' && !isPartAmountValid) {
+      setInitError(
+        `Enter an amount between ${formatNaira(paymentLimits.minAmount)} and ${formatNaira(paymentLimits.maxAmount)}.`
+      );
+      return;
+    }
     setIsInitializing(true);
 
     try {
@@ -186,7 +194,7 @@ export default function PaymentInitiationPage() {
         },
         body: JSON.stringify({
           bookingId: booking.id,
-          paymentChoice: amountPaid > 0 ? 'Balance' : paymentChoice,
+          paymentAmount: payOption === 'part' ? partAmountNumber : undefined,
           callbackBaseUrl:
             typeof window !== 'undefined' ? window.location.origin : undefined,
         }),
@@ -303,49 +311,90 @@ export default function PaymentInitiationPage() {
                   </h2>
                 </div>
 
-                {amountPaid === 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentChoice('FullPayment')}
-                      className={`p-4 rounded-2xl border text-left transition-all ${
-                        paymentChoice === 'FullPayment'
-                          ? 'border-brand-800 bg-brand-50/60 ring-2 ring-brand-800/20'
-                          : 'border-stone-200 hover:border-stone-300'
-                      }`}
-                    >
-                      <span className="text-xs font-bold uppercase tracking-wider text-stone-500 block">
-                        Full Stay Payment
-                      </span>
-                      <span className="text-lg font-bold text-stone-900 mt-1 block">
-                        {formatNaira(totalAmount)}
-                      </span>
-                      <span className="text-[11px] text-stone-500 mt-0.5 block">
-                        100% of agreed reservation total
-                      </span>
-                    </button>
+                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/80 grid grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="block text-stone-500">Total</span>
+                    <span className="block font-bold text-stone-900">{formatNaira(totalAmount)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-stone-500">Paid so far</span>
+                    <span className="block font-bold text-emerald-800">{formatNaira(amountPaid)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-stone-500">Balance</span>
+                    <span className="block font-bold text-stone-900">{formatNaira(remainingBalance)}</span>
+                  </div>
+                </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setPaymentChoice('Deposit')}
-                      className={`p-4 rounded-2xl border text-left transition-all ${
-                        paymentChoice === 'Deposit'
-                          ? 'border-brand-800 bg-brand-50/60 ring-2 ring-brand-800/20'
-                          : 'border-stone-200 hover:border-stone-300'
-                      }`}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPayOption('full')}
+                    className={`p-4 rounded-2xl border text-left transition-all ${
+                      payOption === 'full'
+                        ? 'border-brand-800 bg-brand-50/60 ring-2 ring-brand-800/20'
+                        : 'border-stone-200 hover:border-stone-300'
+                    }`}
+                  >
+                    <span className="text-xs font-bold uppercase tracking-wider text-stone-500 block">
+                      {amountPaid > 0 ? 'Pay Remaining Balance' : 'Pay in Full'}
+                    </span>
+                    <span className="text-lg font-bold text-stone-900 mt-1 block">
+                      {formatNaira(remainingBalance)}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPayOption('part');
+                      if (!partAmount) setPartAmount(String(paymentLimits.minAmount));
+                    }}
+                    disabled={paymentLimits.minAmount >= paymentLimits.maxAmount}
+                    className={`p-4 rounded-2xl border text-left transition-all disabled:opacity-50 ${
+                      payOption === 'part'
+                        ? 'border-brand-800 bg-brand-50/60 ring-2 ring-brand-800/20'
+                        : 'border-stone-200 hover:border-stone-300'
+                    }`}
+                  >
+                    <span className="text-xs font-bold uppercase tracking-wider text-stone-500 block">
+                      Part Payment
+                    </span>
+                    <span className="text-lg font-bold text-stone-900 mt-1 block">
+                      From {formatNaira(paymentLimits.minAmount)}
+                    </span>
+                    <span className="text-[11px] text-stone-500 mt-0.5 block">
+                      Pay the rest later from My Booking
+                    </span>
+                  </button>
+                </div>
+
+                {payOption === 'part' && (
+                  <div>
+                    <label
+                      htmlFor="partAmount"
+                      className="block text-xs font-semibold text-stone-700 mb-1.5"
                     >
-                      <span className="text-xs font-bold uppercase tracking-wider text-stone-500 block">
-                        {realtorConfig.depositPercentage}% Security Deposit
-                      </span>
-                      <span className="text-lg font-bold text-stone-900 mt-1 block">
-                        {formatNaira(depositAmount)}
-                      </span>
-                      <span className="text-[11px] text-stone-500 mt-0.5 block">
-                        Pay balance of{' '}
-                        {formatNaira(totalAmount - depositAmount)} before
-                        arrival
-                      </span>
-                    </button>
+                      Amount to pay now (₦)
+                    </label>
+                    <input
+                      id="partAmount"
+                      type="number"
+                      inputMode="numeric"
+                      min={paymentLimits.minAmount}
+                      max={paymentLimits.maxAmount}
+                      step={1}
+                      value={partAmount}
+                      onChange={(e) => setPartAmount(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-stone-300 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
+                    />
+                    <p
+                      className={`text-xs mt-1.5 ${isPartAmountValid ? 'text-stone-500' : 'text-red-600'}`}
+                    >
+                      Between {formatNaira(paymentLimits.minAmount)} and{' '}
+                      {formatNaira(paymentLimits.maxAmount)}. Balance after this payment:{' '}
+                      {formatNaira(Math.max(0, remainingBalance - partAmountNumber))}.
+                    </p>
                   </div>
                 )}
 

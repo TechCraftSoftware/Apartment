@@ -89,7 +89,7 @@ export function AdminSidebar({ mobileOpen, onCloseMobile }: AdminSidebarProps) {
   };
 
   const brandShort =
-    realtorConfig.businessName.split('&')[0]?.trim() || 'Verdant Stays';
+    realtorConfig.businessName.split('&')[0]?.trim() || 'Ajani Apartment';
 
   const sidebarContent = (
     <div className="flex flex-col h-full bg-brand-950 text-stone-200 w-64 shrink-0 select-none">

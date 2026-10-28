@@ -198,6 +198,21 @@ export function issueBookingVerificationCredentialInTransaction(
   };
 }
 
+/**
+ * True once the guest has paid anything (full or part payment) or submitted a
+ * bank-transfer receipt. Such bookings can no longer be cancelled by the guest.
+ */
+export function hasCustomerMadePayment(booking: Booking): boolean {
+  return (
+    (booking.amountPaid ?? 0) > 0 ||
+    booking.paymentStatus === 'Paid' ||
+    booking.paymentStatus === 'Partially Paid' ||
+    booking.paymentStatus === 'DepositPaid' ||
+    booking.paymentStatus === 'AwaitingVerification' ||
+    Boolean(booking.receiptStorageKey)
+  );
+}
+
 export function buildCustomerBookingVerifiedView(
   db: PlatformDatabaseSchema,
   booking: Booking
@@ -254,9 +269,10 @@ export function buildCustomerBookingVerifiedView(
     (booking.paymentPolicySnapshot !== 'PayAfterApproval' || booking.status === 'Confirmed');
 
   const canCancelBooking =
-    booking.status === 'PendingApproval' ||
-    booking.status === 'Pending' ||
-    (booking.status === 'Confirmed' && booking.paymentStatus !== 'Paid');
+    !hasCustomerMadePayment(booking) &&
+    (booking.status === 'PendingApproval' ||
+      booking.status === 'Pending' ||
+      booking.status === 'Confirmed');
 
   // Show full check-in instructions ONLY when booking is explicitly Confirmed by an administrator
   const showFullCheckInInstructions = booking.status === 'Confirmed';

@@ -22,6 +22,7 @@ import {
   requestFreshBookingVerificationCode,
   adminReissueBookingVerificationCode,
   hashVerificationCode,
+  issueBookingAccessSession,
 } from '../src/server/services/customerAndVerificationService';
 import {
   initializeBookingPayment,
@@ -171,6 +172,59 @@ async function runVerificationSuite() {
   console.log(
     `✅ [Scenario 1] Paystack payment verified: customer created, booking ${verifyPayRes.booking.bookingReference} set to PendingApproval & Paid.`
   );
+
+  // =========================================================================
+  // SCENARIO 1b: PART PAYMENT, NO CANCELLATION AFTER PAYMENT, BALANCE LATER
+  // =========================================================================
+  console.log('\n--- Scenario 1b: Part Payment & Balance ---');
+  const partCheckout = createBookingCheckoutAttempt({
+    apartmentId: 'apt-2',
+    guestName: 'Part Payer',
+    guestEmail: 'part.payer@example.com',
+    guestPhone: '+234 803 555 0111',
+    checkIn: '2027-02-01',
+    checkOut: '2027-02-04',
+    guests: 1,
+    paymentMethod: 'Paystack',
+  });
+  assert.equal(partCheckout.ok, true);
+  if (!partCheckout.ok) throw new Error('Part checkout failed');
+  const partTotal = partCheckout.checkout.totalAmount;
+  const tooSmall = await initializeBookingPayment({
+    checkoutAttemptId: partCheckout.checkout.id,
+    paymentAmount: 1,
+  });
+  assert.equal(tooSmall.ok, false, 'Part payment below the minimum must be rejected');
+  const partNow = Math.ceil(partTotal * 0.6);
+  const partInit = await initializeBookingPayment({
+    checkoutAttemptId: partCheckout.checkout.id,
+    paymentAmount: partNow,
+  });
+  assert.equal(partInit.ok, true);
+  if (!partInit.ok) throw new Error('Part init failed');
+  const partVerify = await verifyBookingPayment({ reference: partInit.reference, simulatedOutcome: 'SUCCESS' });
+  assert.equal(partVerify.ok, true);
+  if (!partVerify.ok) throw new Error('Part verify failed');
+  assert.equal(partVerify.booking.status, 'PendingApproval');
+  assert.equal(partVerify.booking.paymentStatus, 'Partially Paid');
+  assert.equal(partVerify.booking.amountPaid, partNow);
+  assert.equal(partVerify.booking.balanceAmount, partTotal - partNow);
+
+  const partSession = issueBookingAccessSession(partVerify.booking.id);
+  assert.ok(partSession);
+  const cancelAfterPay = cancelBookingByVerifiedCustomer(partSession!.sessionToken, 'changed mind');
+  assert.equal(cancelAfterPay.ok, false, 'Guests cannot cancel once they have paid');
+
+  const balanceInit = await initializeBookingPayment({ bookingId: partVerify.booking.id });
+  assert.equal(balanceInit.ok, true);
+  if (!balanceInit.ok) throw new Error('Balance init failed');
+  assert.equal(balanceInit.payment?.amount, partTotal - partNow);
+  const balanceVerify = await verifyBookingPayment({ reference: balanceInit.reference, simulatedOutcome: 'SUCCESS' });
+  assert.equal(balanceVerify.ok, true);
+  if (!balanceVerify.ok) throw new Error('Balance verify failed');
+  assert.equal(balanceVerify.booking.paymentStatus, 'Paid');
+  assert.equal(balanceVerify.booking.status, 'PendingApproval');
+  console.log(`✅ [Scenario 1b] Part payment ${partNow} of ${partTotal}, cancellation blocked, balance paid.`);
 
   // =========================================================================
   // SCENARIO 2: MANDATORY ADMIN APPROVAL ENFORCEMENT

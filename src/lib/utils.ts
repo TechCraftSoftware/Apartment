@@ -92,7 +92,7 @@ export function getDatesInRange(startDate: string, endDate: string): string[] {
 }
 
 /**
- * Generates a unique booking reference (e.g. "VRD-2026-8492")
+ * Generates a unique booking reference (e.g. "AJN-2026-8492")
  */
 export function generateBookingReference(): string {
   const year = new Date().getFullYear();
@@ -101,5 +101,5 @@ export function generateBookingReference(): string {
   for (let i = 0; i < 5; i++) {
     suffix += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return `VRD-${year}-${suffix}`;
+  return `AJN-${year}-${suffix}`;
 }

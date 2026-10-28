@@ -8,6 +8,7 @@ import {
   issueBookingVerificationCredentialInTransaction,
 } from './customerAndVerificationService';
 import { generateBookingReference } from '@/lib/utils';
+import { resolvePaymentAmount } from '@/lib/payments';
 
 export function isLivePaystackTestKeyConfigured(): boolean {
   const key = process.env.PAYSTACK_SECRET_KEY?.trim() || '';
@@ -18,6 +19,8 @@ export interface InitializePaymentInput {
   checkoutAttemptId?: string;
   bookingId?: string;
   paymentChoice?: 'FullPayment' | 'Deposit' | 'Balance';
+  /** Part payment: amount in NGN to pay now. Omit to pay the full outstanding amount. */
+  paymentAmount?: number | null;
   callbackBaseUrl?: string;
 }
 
@@ -80,7 +83,16 @@ export async function initializeBookingPayment(
       };
     }
 
-    const amountNgn = checkout.totalAmount;
+    const charge = resolvePaymentAmount({
+      totalPrice: checkout.totalAmount,
+      amountAlreadyPaid: 0,
+      depositPercentage: dbSnapshot.realtorConfig.depositPercentage,
+      requestedAmount: input.paymentAmount,
+    });
+    if (!charge.ok) {
+      return { ok: false, error: charge.error, status: 400 };
+    }
+    const amountNgn = charge.amount;
     const amountKobo = Math.round(amountNgn * 100);
     const reference = `PSTK_TEST_${checkout.checkoutReference.replace(/[^A-Z0-9]/gi, '')}_${Date.now().toString(36).toUpperCase()}_${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
     const baseUrl = (input.callbackBaseUrl || 'http://localhost:3000').replace(/\/$/, '');
@@ -137,6 +149,7 @@ export async function initializeBookingPayment(
       chk.paystackAccessCode = accessCode;
       chk.paystackAuthorizationUrl = authorizationUrl;
       chk.paystackMode = mode;
+      chk.chargeAmount = amountNgn;
       chk.status = 'PaymentInitiated';
       chk.updatedAt = new Date().toISOString();
 
@@ -197,23 +210,35 @@ export async function initializeBookingPayment(
 
   const policy: PaymentPolicyType =
     existingBooking.paymentPolicySnapshot || dbSnapshot.realtorConfig.paymentPolicy;
+  const depositPct = dbSnapshot.realtorConfig.depositPercentage || 50;
 
-  let paymentType: PaymentPolicyType | 'Balance' = 'FullPayment';
-  let amountNgn = remainingBalance;
-
-  if (amountAlreadyPaid > 0) {
-    paymentType = 'Balance';
-    amountNgn = remainingBalance;
-  } else if (input.paymentChoice === 'Deposit' || policy === 'Deposit') {
-    paymentType = 'Deposit';
-    const depositPct = dbSnapshot.realtorConfig.depositPercentage || 50;
-    amountNgn =
-      existingBooking.depositRequiredAmount ||
-      Math.round((totalPrice * depositPct) / 100);
-  } else {
-    paymentType = 'FullPayment';
-    amountNgn = totalPrice;
+  // Legacy "Deposit" choice maps onto a part payment of the deposit amount.
+  let requestedAmount = input.paymentAmount;
+  if (
+    (requestedAmount === undefined || requestedAmount === null) &&
+    amountAlreadyPaid === 0 &&
+    (input.paymentChoice === 'Deposit' || policy === 'Deposit')
+  ) {
+    requestedAmount =
+      existingBooking.depositRequiredAmount || Math.ceil((totalPrice * depositPct) / 100);
   }
+
+  const charge = resolvePaymentAmount({
+    totalPrice,
+    amountAlreadyPaid,
+    depositPercentage: depositPct,
+    requestedAmount,
+  });
+  if (!charge.ok) {
+    return { ok: false, error: charge.error, status: 400 };
+  }
+
+  const amountNgn = charge.amount;
+  const paymentType: PaymentRecord['paymentType'] = charge.isPartPayment
+    ? 'PartPayment'
+    : amountAlreadyPaid > 0
+      ? 'Balance'
+      : 'FullPayment';
 
   const amountKobo = Math.round(amountNgn * 100);
   const reference = `PSTK_TEST_${existingBooking.bookingReference.replace(/[^A-Z0-9]/gi, '')}_${Date.now().toString(36).toUpperCase()}_${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
@@ -366,7 +391,9 @@ export async function verifyBookingPayment(
   let mode: 'LIVE_TEST_API' | 'SIMULATED_TEST_MODE' | 'BANK_TRANSFER_RECEIPT' = 'SIMULATED_TEST_MODE';
 
   if (checkoutAttempt) {
-    expectedAmountKobo = Math.round(checkoutAttempt.totalAmount * 100);
+    expectedAmountKobo = Math.round(
+      (checkoutAttempt.chargeAmount ?? checkoutAttempt.totalAmount) * 100
+    );
     mode = checkoutAttempt.paystackMode || 'SIMULATED_TEST_MODE';
   } else {
     const existingPayment = dbSnapshot.payments.find((p) => p.reference === ref);
@@ -482,6 +509,11 @@ export async function verifyBookingPayment(
 
       const bookingId = `bk-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`;
       const apartment = db.apartments.find((a) => a.id === checkout.apartmentId);
+      const paidNow = Math.min(
+        checkout.totalAmount,
+        checkout.chargeAmount ?? checkout.totalAmount
+      );
+      const isPartPayment = paidNow < checkout.totalAmount;
 
       // Create Booking: MUST BE PendingApproval (A successful payment does NOT automatically confirm a booking!)
       const newBooking: Booking = {
@@ -505,14 +537,14 @@ export async function verifyBookingPayment(
         serviceFee: checkout.serviceFee,
         totalPrice: checkout.totalAmount,
         totalAmount: checkout.totalAmount,
-        depositRequiredAmount: checkout.totalAmount,
-        amountPaid: checkout.totalAmount,
-        balanceAmount: 0,
+        depositRequiredAmount: paidNow,
+        amountPaid: paidNow,
+        balanceAmount: checkout.totalAmount - paidNow,
         currency: 'NGN',
         status: 'PendingApproval', // MANDATORY: Never automatically Confirmed!
         bookingStatus: 'PendingApproval',
         paymentMethod: 'Paystack',
-        paymentStatus: 'Paid',
+        paymentStatus: isPartPayment ? 'Partially Paid' : 'Paid',
         receiptVerificationStatus: 'NotApplicable',
         receiptStorageKey: null,
         receiptOriginalFilename: null,
@@ -522,7 +554,7 @@ export async function verifyBookingPayment(
         rejectionReason: null,
         holdExpiresAt: checkout.holdExpiresAt,
         checkoutAttemptId: checkout.id,
-        paymentPolicySnapshot: 'FullPayment',
+        paymentPolicySnapshot: isPartPayment ? 'Deposit' : 'FullPayment',
         source: 'ONLINE',
         specialRequests: checkout.specialRequests,
         adminNotes: 'Online Paystack payment verified. Awaiting manual administrator booking approval.',
@@ -554,10 +586,10 @@ export async function verifyBookingPayment(
         providerReference: ref,
         authorizationUrl: checkout.paystackAuthorizationUrl || '',
         accessCode: checkout.paystackAccessCode || '',
-        amount: checkout.totalAmount,
-        amountKobo: Math.round(checkout.totalAmount * 100),
+        amount: paidNow,
+        amountKobo: Math.round(paidNow * 100),
         currency: 'NGN',
-        paymentType: 'FullPayment',
+        paymentType: isPartPayment ? 'PartPayment' : 'FullPayment',
         status: 'Success',
         paymentStatus: 'Paid',
         receiptVerificationStatus: 'NotApplicable',

@@ -32,6 +32,10 @@ export async function POST(request: Request) {
       checkoutAttemptId: body.checkoutAttemptId,
       bookingId: body.bookingId,
       paymentChoice: body.paymentChoice,
+      paymentAmount:
+        body.paymentAmount === undefined || body.paymentAmount === null || body.paymentAmount === ''
+          ? undefined
+          : Number(body.paymentAmount),
       callbackBaseUrl: body.callbackBaseUrl || origin,
     });
 

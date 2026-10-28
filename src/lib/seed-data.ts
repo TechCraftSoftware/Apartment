@@ -34,12 +34,12 @@ export const AVAILABLE_AMENITIES: string[] = [
 
 export const DEFAULT_REALTOR_CLIENT_CONFIG: RealtorClientConfig = {
   clientId: 'realtor-verdant-stays',
-  businessName: 'Verdant Stays & Luxury Residences',
+  businessName: 'Ajani Apartment',
   tagline:
     'Curated serviced apartments & executive residences across Lagos, Abuja, and Port Harcourt',
-  domain: 'verdantstays.ng',
+  domain: 'ajaniapartment.ng',
   primaryColor: '#059669',
-  contactEmail: 'reservations@verdantstays.ng',
+  contactEmail: 'reservations@ajaniapartment.ng',
   contactPhone: '+234 809 555 0100',
   whatsappNumber: '+234 809 555 0100',
   officeAddress: '14 Admiralty Way, Lekki Phase 1, Lagos, Nigeria',
@@ -55,7 +55,7 @@ export const DEFAULT_REALTOR_CLIENT_CONFIG: RealtorClientConfig = {
     'Free cancellation up to 48 hours before check-in. Cancellations within 48 hours of arrival incur a 1-night retention charge.',
   defaultCheckInInstructions:
     'Present your valid government-issued photo ID and booking reference at the reception desk. Smart-lock keypad PIN is released 2 hours prior to check-in once payment is verified.',
-  bankTransferBeneficiaryName: 'Verdant Stays Hospitality Ltd',
+  bankTransferBeneficiaryName: 'Ajani Apartment',
   bankTransferBankName: 'Guaranty Trust Bank (GTBank) — Corporate Escrow',
   bankTransferAccountNumber: '0148920317',
   bankTransferInstructions:

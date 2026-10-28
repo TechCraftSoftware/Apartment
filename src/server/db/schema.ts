@@ -146,6 +146,8 @@ export interface BookingCheckoutAttemptRecord {
   finalizedCustomerId: string | null;
   finalizedPaymentId: string | null;
   holdExpiresAt: string;
+  /** Amount (NGN) the guest chose to pay now; null/undefined means the full total. */
+  chargeAmount?: number | null;
   failureOrReconciliationNote: string | null;
   createdAt: string;
   updatedAt: string;
@@ -191,7 +193,7 @@ export interface PaymentRecord {
   amount: number; // NGN
   amountKobo: number; // Kobo (NGN * 100)
   currency: 'NGN';
-  paymentType: PaymentPolicyType | 'Balance' | 'BankTransfer';
+  paymentType: PaymentPolicyType | 'Balance' | 'BankTransfer' | 'PartPayment';
   status: PaymentTransactionStatus;
   paymentStatus: PaymentStatus;
   receiptVerificationStatus: ReceiptVerificationStatus;

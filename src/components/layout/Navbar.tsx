@@ -27,7 +27,7 @@ export function Navbar() {
   ];
 
   const brandShort =
-    realtorConfig.businessName.split('&')[0]?.trim() || 'Verdant Stays';
+    realtorConfig.businessName.split('&')[0]?.trim() || 'Ajani Apartment';
 
   return (
     <header className="print:hidden sticky top-0 z-40 bg-sand-50/95 backdrop-blur-md border-b border-stone-200/80">
