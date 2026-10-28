@@ -23,6 +23,9 @@ import {
   LogOut,
   Clock,
   FileText,
+  Printer,
+  Copy,
+  X,
 } from 'lucide-react';
 import { useBookingContext } from '@/context/BookingContext';
 import {
@@ -34,6 +37,7 @@ import { formatDisplayDate, formatNaira } from '@/lib/utils';
 import type { CustomerBookingVerifiedView } from '@/types';
 
 const SESSION_TOKEN_STORAGE_KEY = 'verdant_booking_access_session_token_v1';
+const SHOW_DEV_HELPERS = process.env.NODE_ENV !== 'production';
 
 function MyBookingContent() {
   const searchParams = useSearchParams();
@@ -47,7 +51,6 @@ function MyBookingContent() {
 
   const [activeTab, setActiveTab] = useState<'verify' | 'request-fresh'>('verify');
   const [verificationCode, setVerificationCode] = useState('');
-  const [bookingReference, setBookingReference] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [verifyErrorCode, setVerifyErrorCode] = useState<string | null>(null);
@@ -100,7 +103,6 @@ function MyBookingContent() {
     const qRef = searchParams.get('ref');
     const qCode = searchParams.get('code');
     if (qRef) {
-      setBookingReference(qRef.toUpperCase());
       setFreshRef(qRef.toUpperCase());
     }
     if (qCode) {
@@ -125,17 +127,14 @@ function MyBookingContent() {
       const res = await fetch('/api/my-booking/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          verificationCode: verificationCode.trim(),
-          bookingReference: bookingReference.trim() || undefined,
-        }),
+        body: JSON.stringify({ verificationCode: verificationCode.trim() }),
       });
       const data = await res.json();
 
       if (!res.ok || !data.ok) {
         setVerifyError(
           data.error ||
-            'Unable to verify booking access. Please check your verification code or request a fresh code.'
+            'We could not find a booking for that code. Please check the code in your booking email.'
         );
         setVerifyErrorCode(data.code || null);
         setIsVerifying(false);
@@ -148,13 +147,8 @@ function MyBookingContent() {
       setSessionToken(data.sessionToken);
       setVerifiedBooking(data.booking);
       setVerificationCode('');
-      addToast({
-        type: 'success',
-        title: 'Booking Access Verified',
-        message: `Viewing reservation ${data.booking.bookingReference}. One-time code has been marked as used.`,
-      });
     } catch {
-      setVerifyError('Network error while verifying booking code.');
+      setVerifyError('Network error. Please check your connection and try again.');
     } finally {
       setIsVerifying(false);
     }
@@ -177,18 +171,17 @@ function MyBookingContent() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setVerifyError(data.error || 'Could not request fresh code.');
+        setVerifyError(data.error || 'Could not resend your access code.');
       } else {
         setFreshResultMessage(data.message);
         if (data.devModeCodePreview) {
           setFreshDevCodePreview(data.devModeCodePreview);
-          setBookingReference(freshRef.trim().toUpperCase());
           setVerificationCode(data.devModeCodePreview);
         }
         await refreshPlatformState();
       }
     } catch {
-      setVerifyError('Network error while requesting a fresh verification code.');
+      setVerifyError('Network error while resending your access code.');
     } finally {
       setIsRequestingFresh(false);
     }
@@ -239,6 +232,39 @@ function MyBookingContent() {
     }
   };
 
+  const handlePrintBooking = () => {
+    if (typeof window !== 'undefined') window.print();
+  };
+
+  const handleCopySummary = async () => {
+    if (!verifiedBooking) return;
+    const b = verifiedBooking;
+    const summary = [
+      `${b.realtorBusinessName} — Booking ${b.bookingReference}`,
+      `Guest: ${b.customerFullName}`,
+      `Apartment: ${b.apartmentName}, ${b.apartmentLocation}`,
+      `Check-in: ${formatDisplayDate(b.checkIn)} (${b.checkInTime})`,
+      `Check-out: ${formatDisplayDate(b.checkOut)} (${b.checkOutTime})`,
+      `Guests: ${b.guests} • Nights: ${b.nights}`,
+      `Booking status: ${b.status === 'PendingApproval' ? 'Awaiting confirmation' : b.status}`,
+      `Payment: ${b.paymentStatus} (${formatNaira(b.amountPaid)} of ${formatNaira(b.totalPrice)})`,
+    ].join('\n');
+    try {
+      await navigator.clipboard.writeText(summary);
+      addToast({
+        type: 'success',
+        title: 'Booking Details Copied',
+        message: 'Paste them into a message to share your booking.',
+      });
+    } catch {
+      addToast({
+        type: 'error',
+        title: 'Copy Failed',
+        message: 'Your browser blocked clipboard access. Use Print instead.',
+      });
+    }
+  };
+
   const handleEndBookingSession = () => {
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
@@ -254,11 +280,11 @@ function MyBookingContent() {
     return (
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
         {/* Session Header Bar */}
-        <div className="bg-brand-950 text-white rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-lg">
+        <div className="bg-brand-950 text-white rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-lg print:shadow-none">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-semibold">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Verified Customer Booking Session (Passwordless Access)</span>
+              <span>{verifiedBooking.realtorBusinessName} • Booking Details</span>
             </div>
             <h1 className="font-serif text-2xl sm:text-3xl font-bold">
               Reservation {verifiedBooking.bookingReference}
@@ -270,14 +296,30 @@ function MyBookingContent() {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3 print:hidden">
+            <button
+              type="button"
+              onClick={handlePrintBooking}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white text-brand-950 hover:bg-stone-100 text-xs font-semibold transition-colors"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print / Save PDF</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleCopySummary}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-brand-900 hover:bg-brand-800 border border-brand-700 text-xs font-semibold text-stone-200 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Copy Details</span>
+            </button>
             <button
               type="button"
               onClick={() => sessionToken && loadSessionBooking(sessionToken)}
               className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-brand-900 hover:bg-brand-800 border border-brand-700 text-xs font-semibold text-stone-200 transition-colors"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Refresh Status</span>
+              <span>Refresh</span>
             </button>
             <button
               type="button"
@@ -285,7 +327,7 @@ function MyBookingContent() {
               className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-xs font-semibold text-white transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span>Verify Another Booking</span>
+              <span>Close</span>
             </button>
           </div>
         </div>
@@ -333,7 +375,7 @@ function MyBookingContent() {
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 print:hidden">
               {verifiedBooking.hasUploadedReceipt && verifiedBooking.receiptStorageKey && (
                 <a
                   href={`/api/receipts/${verifiedBooking.receiptStorageKey}?token=${encodeURIComponent(sessionToken || '')}`}
@@ -381,7 +423,7 @@ function MyBookingContent() {
             <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-xs text-amber-950 flex items-start gap-3">
               <Clock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <div className="space-y-1">
-                <span className="font-bold text-amber-900 block">Next Steps & Approval Status</span>
+                <span className="font-bold text-amber-900 block">What happens next</span>
                 <p className="leading-relaxed">{verifiedBooking.nextStepsSummary}</p>
                 {verifiedBooking.rejectionReason && (
                   <p className="text-red-700 font-medium pt-1">
@@ -586,324 +628,247 @@ function MyBookingContent() {
     );
   }
 
-  // Default Unauthenticated View: Enter Verification Code OR Request Fresh Code
+  // Default view: enter the booking access code from the booking email
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 space-y-8">
-      {/* Header */}
-      <div className="text-center max-w-2xl mx-auto space-y-3">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand-100 text-brand-900 text-xs font-semibold">
-          <Lock className="w-3.5 h-3.5 text-brand-700" />
-          <span>Passwordless Customer Booking Access</span>
+    <div className="max-w-xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
+      <div className="text-center space-y-3">
+        <div className="w-14 h-14 rounded-2xl bg-brand-100 text-brand-800 flex items-center justify-center mx-auto">
+          <KeyRound className="w-7 h-7" />
         </div>
         <h1 className="font-serif text-3xl sm:text-4xl font-bold text-stone-900">
-          Access Your Booking with a Verification Code
+          View My Booking
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
-          No customer account password is required. Enter the one-time 6-digit
-          verification code sent to your email or phone number when you booked
-          with <strong>{realtorConfig.businessName}</strong>.
+          Enter the booking access code we emailed you when you booked with{' '}
+          <strong>{realtorConfig.businessName}</strong>.
         </p>
       </div>
 
-      {/* Main Card */}
-      <div className="bg-white rounded-3xl border border-stone-200/90 shadow-md overflow-hidden">
-        {/* Tabs */}
-        <div className="grid grid-cols-2 border-b border-stone-200 bg-stone-50">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('verify');
-              setVerifyError(null);
-            }}
-            className={`py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
-              activeTab === 'verify'
-                ? 'bg-white text-brand-900 border-b-2 border-brand-800'
-                : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <KeyRound className="w-4 h-4" />
-            <span>Enter Verification Code</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('request-fresh');
-              setVerifyError(null);
-            }}
-            className={`py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
-              activeTab === 'request-fresh'
-                ? 'bg-white text-brand-900 border-b-2 border-brand-800'
-                : 'text-stone-600 hover:text-stone-900'
-            }`}
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Code Expired? Request Fresh Code</span>
-          </button>
-        </div>
-
-        <div className="p-6 sm:p-8 space-y-6">
-          {verifyError && (
-            <div className="p-4 rounded-2xl bg-red-50 border border-red-200 flex items-start justify-between gap-3 text-xs sm:text-sm text-red-900">
-              <div className="flex items-start gap-2.5">
-                <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold">{verifyError}</p>
-                  {(verifyErrorCode === 'EXPIRED_CODE' ||
-                    verifyErrorCode === 'USED_CODE') && (
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('request-fresh')}
-                      className="mt-1.5 inline-flex items-center gap-1 text-xs font-bold text-red-800 underline"
-                    >
-                      Click here to request a fresh verification code →
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'verify' ? (
-            <form onSubmit={handleVerifySubmit} className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label
-                    htmlFor="verificationCode"
-                    className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2"
-                  >
-                    6-Digit Verification Code *
-                  </label>
-                  <input
-                    id="verificationCode"
-                    type="text"
-                    required
-                    placeholder="e.g. 842101"
-                    value={verificationCode}
-                    onChange={(e) => setVerificationCode(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-stone-300 font-mono text-lg tracking-widest text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
-                  />
-                  <span className="text-[11px] text-stone-500 mt-1 block">
-                    One-time code sent via email/SMS. Expires after{' '}
-                    {realtorConfig.verificationCodeExpiryMinutes} minutes.
-                  </span>
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="bookingReference"
-                    className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2"
-                  >
-                    Booking Reference (Optional)
-                  </label>
-                  <input
-                    id="bookingReference"
-                    type="text"
-                    placeholder="e.g. BK-2026-8421"
-                    value={bookingReference}
-                    onChange={(e) =>
-                      setBookingReference(e.target.value.toUpperCase())
-                    }
-                    className="w-full px-4 py-3 rounded-xl border border-stone-300 font-mono text-base uppercase text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
-                  />
-                  <span className="text-[11px] text-stone-500 mt-1 block">
-                    Note: Booking reference alone cannot unlock a booking without
-                    a valid verification code.
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isVerifying}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-brand-800 hover:bg-brand-900 text-white text-sm font-semibold transition-colors shadow-xs disabled:opacity-50"
-              >
-                <KeyRound className="w-4 h-4" />
-                <span>
-                  {isVerifying
-                    ? 'Verifying Code...'
-                    : 'Verify Code & Access My Booking'}
-                </span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleRequestFreshCode} className="space-y-5">
-              <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
-                If your one-time verification code has expired or was already
-                used, enter your <strong>Booking Reference</strong> and the{' '}
-                <strong>Email Address or Phone Number</strong> used when making
-                the booking. We will invalidate any previous code and issue a
-                fresh one.
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label
-                    htmlFor="freshRef"
-                    className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2"
-                  >
-                    Booking Reference *
-                  </label>
-                  <input
-                    id="freshRef"
-                    type="text"
-                    required
-                    placeholder="e.g. BK-2026-8421"
-                    value={freshRef}
-                    onChange={(e) => setFreshRef(e.target.value.toUpperCase())}
-                    className="w-full px-4 py-3 rounded-xl border border-stone-300 font-mono text-sm uppercase text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="freshContact"
-                    className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2"
-                  >
-                    Registered Email or Phone *
-                  </label>
-                  <input
-                    id="freshContact"
-                    type="text"
-                    required
-                    placeholder="e.g. chidi.nwosu@lagosventures.ng"
-                    value={freshContact}
-                    onChange={(e) => setFreshContact(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-stone-300 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isRequestingFresh}
-                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-brand-800 hover:bg-brand-900 text-white text-sm font-semibold transition-colors shadow-xs disabled:opacity-50"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>
-                  {isRequestingFresh
-                    ? 'Sending Fresh Code...'
-                    : 'Send Fresh Verification Code'}
-                </span>
-              </button>
-
-              {freshResultMessage && (
-                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-3">
-                  <div className="flex items-start gap-2.5 text-xs sm:text-sm text-emerald-950">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                    <p>{freshResultMessage}</p>
-                  </div>
-
-                  {freshDevCodePreview && (
-                    <div className="p-3.5 rounded-xl bg-white border border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
-                          Development Mode Outbox Preview
-                        </span>
-                        <span className="text-xs text-stone-700">
-                          Fresh One-Time Code:{' '}
-                          <strong className="font-mono text-base text-stone-950">
-                            {freshDevCodePreview}
-                          </strong>
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('verify')}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900 text-white text-xs font-semibold"
-                      >
-                        <KeyRound className="w-3.5 h-3.5" />
-                        <span>Use Code Now →</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </form>
-          )}
-        </div>
-      </div>
-
-      {/* Evaluator / Development Quick-Test Helper Box */}
-      <div className="bg-amber-50/70 rounded-3xl border border-amber-200/90 p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <Sparkles className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+      <div className="bg-white rounded-3xl border border-stone-200/90 shadow-md p-6 sm:p-8 space-y-5">
+        {verifyError && (
+          <div className="p-4 rounded-2xl bg-red-50 border border-red-200 flex items-start gap-2.5 text-sm text-red-900">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
             <div>
-              <h2 className="text-sm font-bold text-amber-950">
-                Development / Evaluator Mode: Sample Booking Verification Codes
-              </h2>
-              <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed">
-                In production, verification codes are delivered privately via
-                email/SMS and stored only as SHA-256 hashes in the database. For
-                evaluation, click any booking below to pre-fill its active
-                verification code or test requesting a fresh code:
-              </p>
+              <p className="font-semibold">{verifyError}</p>
+              {(verifyErrorCode === 'EXPIRED_CODE' ||
+                verifyErrorCode === 'USED_CODE') && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('request-fresh')}
+                  className="mt-1.5 text-xs font-bold text-red-800 underline cursor-pointer"
+                >
+                  Send me a new code →
+                </button>
+              )}
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {bookings.slice(0, 6).map((bk) => {
-            const ref = bk.bookingReference || bk.reference;
-            const code = devVerificationCodes[ref.toUpperCase()];
-            return (
-              <div
-                key={bk.id}
-                className="p-3.5 rounded-2xl bg-white border border-amber-200/90 flex items-center justify-between gap-3 text-xs"
+        {activeTab === 'verify' ? (
+          <form onSubmit={handleVerifySubmit} className="space-y-5">
+            <div>
+              <label
+                htmlFor="verificationCode"
+                className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2"
               >
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-stone-900">
-                      {ref}
-                    </span>
-                    <BookingStatusBadge status={bk.status} size="sm" />
-                    <PaymentStatusBadge
-                      status={bk.paymentStatus || 'Unpaid'}
-                      size="sm"
-                    />
-                  </div>
-                  <p className="text-stone-600">
-                    {bk.guestName} • {bk.guestEmail}
-                  </p>
-                  <p className="text-[11px] text-amber-900 font-mono">
-                    Dev Code: <strong>{code || 'Request Fresh Code'}</strong>
-                  </p>
-                </div>
+                Booking Access Code
+              </label>
+              <input
+                id="verificationCode"
+                type="text"
+                required
+                autoComplete="one-time-code"
+                autoCapitalize="characters"
+                spellCheck={false}
+                placeholder="XXXX-XXXX"
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value.toUpperCase())}
+                className="w-full px-4 py-4 rounded-xl border border-stone-300 font-mono text-2xl text-center tracking-[0.3em] uppercase text-stone-900 placeholder:text-stone-300 focus:outline-none focus:ring-2 focus:ring-brand-700"
+              />
+              <span className="text-xs text-stone-500 mt-2 block text-center">
+                You can use this code as many times as you need, before, during and after your stay.
+              </span>
+            </div>
 
-                <div className="flex flex-col gap-1.5 shrink-0">
-                  {code && (
+            <button
+              type="submit"
+              disabled={isVerifying}
+              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-brand-800 hover:bg-brand-900 text-white text-sm font-semibold transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
+            >
+              <span>{isVerifying ? 'Checking code...' : 'View My Booking'}</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+
+            <p className="text-center text-xs text-stone-600">
+              Lost your code?{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('request-fresh');
+                  setVerifyError(null);
+                }}
+                className="font-semibold text-brand-800 hover:underline cursor-pointer"
+              >
+                Email it to me again
+              </button>
+            </p>
+          </form>
+        ) : (
+          <form onSubmit={handleRequestFreshCode} className="space-y-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-stone-900">Resend my access code</h2>
+                <p className="text-xs text-stone-600 leading-relaxed mt-1">
+                  Enter your booking reference and the email address or phone number
+                  you booked with. We&apos;ll email you a new code (your old code will
+                  stop working).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('verify');
+                  setVerifyError(null);
+                }}
+                className="p-1.5 rounded-lg text-stone-500 hover:bg-stone-100 cursor-pointer"
+                aria-label="Back to code entry"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="freshRef"
+                  className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2"
+                >
+                  Booking Reference
+                </label>
+                <input
+                  id="freshRef"
+                  type="text"
+                  required
+                  placeholder="e.g. BK-2026-8421"
+                  value={freshRef}
+                  onChange={(e) => setFreshRef(e.target.value.toUpperCase())}
+                  className="w-full px-4 py-3 rounded-xl border border-stone-300 font-mono text-sm uppercase text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="freshContact"
+                  className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-2"
+                >
+                  Email or Phone Used for Booking
+                </label>
+                <input
+                  id="freshContact"
+                  type="text"
+                  required
+                  placeholder="you@example.com"
+                  value={freshContact}
+                  onChange={(e) => setFreshContact(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-stone-300 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isRequestingFresh}
+              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-brand-800 hover:bg-brand-900 text-white text-sm font-semibold transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
+            >
+              <Mail className="w-4 h-4" />
+              <span>{isRequestingFresh ? 'Sending...' : 'Email My Access Code'}</span>
+            </button>
+
+            {freshResultMessage && (
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-3">
+                <div className="flex items-start gap-2.5 text-sm text-emerald-950">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <p>{freshResultMessage}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('verify')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900 text-white text-xs font-semibold cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Enter My Code</span>
+                </button>
+                {freshDevCodePreview && (
+                  <p className="text-xs text-amber-900 font-mono">
+                    Dev outbox (no SMTP configured): <strong>{freshDevCodePreview}</strong>
+                  </p>
+                )}
+              </div>
+            )}
+          </form>
+        )}
+      </div>
+
+      {SHOW_DEV_HELPERS && (
+        <details className="bg-amber-50/70 rounded-3xl border border-amber-200/90 p-5 text-xs">
+          <summary className="flex items-center gap-2 font-bold text-amber-950 cursor-pointer">
+            <Sparkles className="w-4 h-4 text-amber-700" />
+            Development only: sample booking codes
+          </summary>
+          <p className="text-amber-900/90 mt-2 leading-relaxed">
+            Hidden in production builds. Codes only appear here when no SMTP
+            server is configured.
+          </p>
+          <div className="grid grid-cols-1 gap-2 mt-3">
+            {bookings.slice(0, 6).map((bk) => {
+              const ref = bk.bookingReference || bk.reference;
+              const code = devVerificationCodes[ref.toUpperCase()];
+              return (
+                <div
+                  key={bk.id}
+                  className="p-3 rounded-2xl bg-white border border-amber-200/90 flex items-center justify-between gap-3"
+                >
+                  <div className="space-y-0.5 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono font-bold text-stone-900">{ref}</span>
+                      <BookingStatusBadge status={bk.status} size="sm" />
+                      <PaymentStatusBadge status={bk.paymentStatus || 'Unpaid'} size="sm" />
+                    </div>
+                    <p className="text-amber-900 font-mono">
+                      Code: <strong>{code || '—'}</strong>
+                    </p>
+                  </div>
+                  {code ? (
                     <button
                       type="button"
                       onClick={() => {
                         setActiveTab('verify');
-                        setBookingReference(ref);
                         setVerificationCode(code);
                         setVerifyError(null);
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-semibold"
+                      className="px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white font-semibold shrink-0 cursor-pointer"
                     >
                       Fill Code
                     </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('request-fresh');
+                        setFreshRef(ref);
+                        setFreshContact(bk.guestEmail);
+                        setVerifyError(null);
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-stone-300 hover:bg-stone-100 text-stone-700 font-medium shrink-0 cursor-pointer"
+                    >
+                      Resend
+                    </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab('request-fresh');
-                      setFreshRef(ref);
-                      setFreshContact(bk.guestEmail);
-                      setVerifyError(null);
-                    }}
-                    className="px-3 py-1.5 rounded-lg border border-stone-300 hover:bg-stone-100 text-stone-700 font-medium"
-                  >
-                    Fresh Code
-                  </button>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

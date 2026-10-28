@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyBookingPayment } from '@/server/services/paystackService';
+import { deliverQueuedBookingEmails } from '@/server/services/emailService';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
       simulatedChannel: body.simulatedChannel,
       channel: body.channel,
     });
+    await deliverQueuedBookingEmails();
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });

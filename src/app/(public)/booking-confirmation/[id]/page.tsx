@@ -126,7 +126,7 @@ export default function BookingConfirmationPage() {
               <p className="text-xs sm:text-sm text-stone-300 mt-1">
                 {booking.paymentMethod === 'BankTransfer'
                   ? 'Your bank transfer receipt is safely received and awaiting administrator verification.'
-                  : 'A customer account and one-time verification code have been generated for your reservation.'}
+                  : `Your booking details and personal access code have been sent to ${booking.guestEmail}.`}
               </p>
             </div>
           </div>
@@ -257,22 +257,25 @@ export default function BookingConfirmationPage() {
                 <div className="flex items-center justify-between">
                   <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-950">
                     <KeyRound className="w-4 h-4 text-amber-700" />
-                    Passwordless Booking Access
+                    Your Booking Access Code
                   </span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-950">
-                    Dev Mode Outbox Preview
-                  </span>
+                  {devCode && (
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-950">
+                      Dev Mode Outbox Preview
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-amber-950/90 leading-relaxed">
-                  No customer password is required. A one-time verification code
-                  (SHA-256 hashed in DB) was dispatched to{' '}
-                  <strong>{booking.guestEmail}</strong>:
+                  We emailed your booking details and access code to{' '}
+                  <strong>{booking.guestEmail}</strong>. Enter the code on the My
+                  Booking page any time to view your booking, or show it to anyone
+                  who needs to see it.
                 </p>
                 {devCode ? (
                   <div className="flex items-center justify-between bg-white border border-amber-300 rounded-xl px-3.5 py-2">
                     <div>
                       <span className="text-[10px] uppercase tracking-wider text-stone-500 block">
-                        One-Time Verification Code
+                        Booking Access Code
                       </span>
                       <span className="font-mono text-lg font-bold tracking-widest text-stone-900">
                         {devCode}
@@ -289,22 +292,18 @@ export default function BookingConfirmationPage() {
                   </div>
                 ) : (
                   <p className="text-xs text-amber-900 italic">
-                    You can request a fresh verification code anytime on{' '}
-                    <code>/my-booking</code>.
+                    Can&apos;t find the email? Check your spam folder, or request
+                    the code again on the My Booking page.
                   </p>
                 )}
               </div>
 
               <Link
-                href={
-                  devCode
-                    ? `/my-booking?ref=${encodeURIComponent(ref)}&code=${encodeURIComponent(devCode)}`
-                    : `/my-booking?ref=${encodeURIComponent(ref)}`
-                }
+                href="/my-booking"
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs sm:text-sm font-semibold transition-colors"
               >
                 <KeyRound className="w-4 h-4" />
-                <span>Verify & View Booking on /my-booking</span>
+                <span>Go to My Booking</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>

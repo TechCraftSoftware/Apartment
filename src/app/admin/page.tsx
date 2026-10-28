@@ -179,8 +179,8 @@ export default function AdminDashboardPage() {
             </span>
           </div>
           <p className="text-xs text-stone-600">
-            Customers book without login and verify access via one-time SHA-256
-            hashed verification codes on <code>/my-booking</code>. Payments run
+            Customers book without login and view their booking with the
+            reusable access code emailed to them, on <code>/my-booking</code>. Payments run
             in Paystack Test Mode (NGN / kobo).
           </p>
         </div>

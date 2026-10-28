@@ -242,6 +242,18 @@ function PaymentCallbackContent() {
             </button>
           </div>
 
+          {isSuccess && (
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-start gap-3 text-xs sm:text-sm text-emerald-950">
+              <KeyRound className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+              <p className="leading-relaxed">
+                Your booking details and personal access code have been sent to{' '}
+                <strong>{result.booking.guestEmail}</strong>. Use the code on the
+                My Booking page any time to view your booking. You&apos;ll get
+                another email once our team confirms your reservation.
+              </p>
+            </div>
+          )}
+
           {/* Transaction Metadata Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             <div className="p-4 rounded-2xl bg-sand-50 border border-stone-200/80 space-y-2">
@@ -317,11 +329,11 @@ function PaymentCallbackContent() {
               </Link>
 
               <Link
-                href={`/my-booking?ref=${encodeURIComponent(bkRef)}`}
+                href="/my-booking"
                 className="inline-flex items-center gap-2 px-4 py-3 rounded-xl border border-stone-300 bg-white hover:bg-stone-50 text-stone-800 text-xs sm:text-sm font-semibold transition-colors"
               >
                 <KeyRound className="w-4 h-4 text-brand-700" />
-                <span>Manage on /my-booking</span>
+                <span>Go to My Booking</span>
               </Link>
             </div>
 

@@ -10,11 +10,26 @@ import type {
 import type { Booking, CustomerBookingVerifiedView } from '@/types';
 import { calculateNights } from '@/lib/utils';
 import { requireRealtorAdmin } from './authService';
+import { isEmailDeliveryConfigured, queueBookingEmail } from './emailService';
 
+// No 0/O, 1/I/L so codes are easy to read out and type from an email.
+const ACCESS_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+/**
+ * Generates a reusable booking access code formatted as XXXX-XXXX.
+ * The code is the only credential needed on /my-booking, so it carries
+ * ~39 bits of entropy rather than a 6-digit number.
+ */
 export function generateCryptographicVerificationCode(): string {
-  const num = crypto.randomInt(100000, 1000000);
-  return String(num);
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += ACCESS_CODE_ALPHABET[crypto.randomInt(ACCESS_CODE_ALPHABET.length)];
+  }
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
 }
+
+/** Access codes stay valid until 30 days after check-out. */
+const ACCESS_CODE_DAYS_AFTER_CHECKOUT = 30;
 
 export function generateBookingSessionToken(): string {
   return crypto.randomBytes(24).toString('hex');
@@ -95,20 +110,16 @@ export function issueBookingVerificationCredentialInTransaction(
 } {
   const now = new Date();
   const nowIso = now.toISOString();
-  const expiryMinutes =
+  const stayBasedExpiry = new Date(`${params.booking.checkOut}T23:59:59`);
+  stayBasedExpiry.setDate(stayBasedExpiry.getDate() + ACCESS_CODE_DAYS_AFTER_CHECKOUT);
+  const expiresAtIso =
     params.customExpiryMinutes !== undefined
-      ? params.customExpiryMinutes
-      : db.realtorConfig.verificationCodeExpiryMinutes || 60;
+      ? new Date(now.getTime() + params.customExpiryMinutes * 60 * 1000).toISOString()
+      : new Date(Math.max(stayBasedExpiry.getTime(), now.getTime() + 24 * 60 * 60 * 1000)).toISOString();
 
-  const expiresAtIso = new Date(now.getTime() + expiryMinutes * 60 * 1000).toISOString();
-
-  // Revoke any previous unused credentials for this booking
+  // Revoke any previous active credentials for this booking (only the newest code works)
   for (const existingCred of db.bookingAccessCredentials) {
-    if (
-      existingCred.bookingId === params.booking.id &&
-      !existingCred.usedAt &&
-      !existingCred.revokedAt
-    ) {
+    if (existingCred.bookingId === params.booking.id && !existingCred.revokedAt) {
       existingCred.revokedAt = nowIso;
     }
   }
@@ -119,7 +130,7 @@ export function issueBookingVerificationCredentialInTransaction(
   let safetyCounter = 0;
   while (
     db.bookingAccessCredentials.some(
-      (c) => c.codeHash === codeHash && !c.usedAt && !c.revokedAt
+      (c) => c.codeHash === codeHash && !c.revokedAt
     ) &&
     safetyCounter < 10
   ) {
@@ -146,7 +157,7 @@ export function issueBookingVerificationCredentialInTransaction(
 
   db.bookingAccessCredentials.unshift(credential);
 
-  const hasLiveNotificationProvider = Boolean(process.env.SMTP_HOST || process.env.SMS_API_KEY);
+  const emailConfigured = isEmailDeliveryConfigured();
 
   const notification: NotificationRecord = {
     id: `notif-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
@@ -162,13 +173,23 @@ export function issueBookingVerificationCredentialInTransaction(
       params.template === 'BOOKING_CREATED_CODE'
         ? `Your Booking ${params.booking.bookingReference} & Verification Code — ${db.realtorConfig.businessName}`
         : `New Verification Code for Booking ${params.booking.bookingReference} — ${db.realtorConfig.businessName}`,
-    messagePreview: `Hello ${params.customer.fullName}, your one-time verification code to access booking ${params.booking.bookingReference} on /my-booking is ready. Valid until ${new Date(expiresAtIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`,
-    devModeCodePreview: rawCode,
-    deliveryStatus: hasLiveNotificationProvider ? 'Sent' : 'SimulatedInDev',
+    messagePreview: `Hello ${params.customer.fullName}, your booking access code for ${params.booking.bookingReference} is ready. Use it on /my-booking to view your booking details any time.`,
+    // The raw code is only kept for the dev outbox when no real email provider exists.
+    devModeCodePreview: emailConfigured ? null : rawCode,
+    deliveryStatus: emailConfigured ? 'Queued' : 'SimulatedInDev',
     createdAt: nowIso,
   };
 
   db.notifications.unshift(notification);
+
+  queueBookingEmail({
+    kind: 'ACCESS_CODE',
+    notificationId: notification.id,
+    recipientEmail: params.customer.email,
+    subject: notification.subject,
+    accessCode: rawCode,
+    booking: buildCustomerBookingVerifiedView(db, params.booking),
+  });
 
   return {
     rawVerificationCode: rawCode,
@@ -331,7 +352,7 @@ export function buildCustomerBookingVerifiedView(
 }
 
 const GENERIC_VERIFICATION_ERROR =
-  'Unable to verify booking access. Please check your verification code (and booking reference if provided) or request a fresh code.';
+  'We could not find a booking for that code. Please check the code in your booking email and try again.';
 
 export function verifyBookingAccessCode(input: {
   verificationCode: string;
@@ -354,10 +375,10 @@ export function verifyBookingAccessCode(input: {
   const optionalRef = input.bookingReference?.trim().toUpperCase() || '';
   const rateKey = (input.rateLimitKey || 'global-anon').trim().toLowerCase();
 
-  if (!rawCode || rawCode.replace(/[\s-]/g, '').length < 4) {
+  if (!rawCode || rawCode.replace(/[\s-]/g, '').length < 6) {
     return {
       ok: false,
-      error: 'Please enter a valid 6-digit verification code.',
+      error: 'Please enter the booking access code from your email.',
       code: 'INVALID_INPUT',
       status: 400,
     };
@@ -416,11 +437,7 @@ export function verifyBookingAccessCode(input: {
       // If bookingReference was provided, also increment failedAttempts on any active credential for that booking
       if (optionalRef) {
         for (const cred of db.bookingAccessCredentials) {
-          if (
-            cred.bookingReference.toUpperCase() === optionalRef &&
-            !cred.usedAt &&
-            !cred.revokedAt
-          ) {
+          if (cred.bookingReference.toUpperCase() === optionalRef && !cred.revokedAt) {
             cred.failedAttempts += 1;
             cred.lastAttemptAt = nowIso;
             if (cred.failedAttempts >= maxAttempts) {
@@ -448,8 +465,9 @@ export function verifyBookingAccessCode(input: {
       };
     }
 
-    // Pick the most recent matching credential
-    const credential = matchingCredentials[0];
+    // Prefer the active credential; fall back to the most recent match for error messages
+    const credential =
+      matchingCredentials.find((c) => !c.revokedAt) || matchingCredentials[0];
 
     if (credential.lockedUntil && new Date(credential.lockedUntil) > now) {
       return {
@@ -461,25 +479,20 @@ export function verifyBookingAccessCode(input: {
       };
     }
 
-    if (credential.revokedAt || credential.usedAt) {
+    // Codes are reusable: customers can open their booking as often as they like.
+    // A code only stops working once a newer one has been issued for the booking.
+    if (credential.revokedAt) {
       return {
         ok: false as const,
         error:
-          'This one-time verification code has already been used or superseded. Please request a fresh verification code below.',
+          'This code has been replaced by a newer one. Please use the latest code sent to your email, or request it again below.',
         code: 'USED_CODE' as const,
         status: 401 as const,
       };
     }
 
-    if (new Date(credential.expiresAt) <= now) {
-      return {
-        ok: false as const,
-        error:
-          'This verification code has expired. Please request a fresh verification code below.',
-        code: 'EXPIRED_CODE' as const,
-        status: 401 as const,
-      };
-    }
+    // A correct, current code always opens the booking, including past stays,
+    // so guests can always check their details and booking status.
 
     const booking = db.bookings.find((b) => b.id === credential.bookingId);
     if (!booking) {
@@ -491,8 +504,8 @@ export function verifyBookingAccessCode(input: {
       };
     }
 
-    // Valid! Mark the one-time code as used and reset rate limit counter
-    credential.usedAt = nowIso;
+    // Valid! Record the access (the code stays usable) and reset rate limit counter
+    credential.usedAt = credential.usedAt || nowIso;
     credential.lastAttemptAt = nowIso;
     rateRecord.attempts = 0;
     rateRecord.lockedUntil = null;
@@ -544,7 +557,7 @@ export function getVerifiedBookingBySessionToken(
   if (!sessionToken || !sessionToken.trim()) {
     return {
       ok: false,
-      error: 'Booking verification session required. Please enter your verification code.',
+      error: 'Please enter your booking access code.',
       status: 401,
     };
   }
@@ -560,7 +573,7 @@ export function getVerifiedBookingBySessionToken(
   if (!session) {
     return {
       ok: false,
-      error: 'Your booking access session has expired. Please enter a verification code.',
+      error: 'Your booking view has timed out. Please enter your booking access code again.',
       status: 401,
     };
   }
@@ -618,7 +631,7 @@ export function requestFreshBookingVerificationCode(input: {
       return {
         ok: true as const,
         message:
-          'If a matching booking was found for those details, a fresh one-time verification code has been sent to the registered email and phone number.',
+          'If a booking matches those details, a new access code has been sent to the email address used for the booking.',
         devModeCodePreview: null,
         expiresAt: null,
       };
@@ -706,7 +719,7 @@ export function adminReissueBookingVerificationCode(
       bookingReference: booking.bookingReference,
       devModeCodePreview: issued.notification.devModeCodePreview,
       expiresAt: issued.credential.expiresAt,
-      message: `Fresh verification code issued and dispatched to ${booking.guestEmail}.`,
+      message: `New booking access code issued and sent to ${booking.guestEmail}.`,
     };
   });
 }

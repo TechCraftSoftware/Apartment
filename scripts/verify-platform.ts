@@ -151,7 +151,7 @@ async function runVerificationSuite() {
 
   // Verify booking access code was issued
   assert.ok(verifyPayRes.devModeVerificationCode, 'Dev mode code must be available');
-  assert.equal(verifyPayRes.devModeVerificationCode?.length, 6);
+  assert.match(verifyPayRes.devModeVerificationCode!, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 
   // 4. Test Idempotent callback replay
   const verifyPayReplay = await verifyBookingPayment({
@@ -418,15 +418,29 @@ async function runVerificationSuite() {
   assert.equal(verifiedAccess.ok, true);
   assert.ok(verifiedAccess.accessToken);
 
-  // Code cannot be reused
+  // Code is reusable: the customer can open the booking again with the same code alone
   const reuseAttempt = verifyBookingWithCode({
-    bookingReference: verifyPayRes.booking.bookingReference,
-    contactMethod: 'EMAIL',
-    contactValue: 'chidinma.okafor@lagosmail.ng',
-    verificationCode: verifyPayRes.devModeVerificationCode!,
+    verificationCode: verifyPayRes.devModeVerificationCode!.toLowerCase().replace('-', ''),
     ipKey: 'test-client-6-reuse',
   });
-  assert.equal(reuseAttempt.ok, false, 'Used one-time code must be rejected');
+  assert.equal(reuseAttempt.ok, true, 'Booking access code must be reusable and format-tolerant');
+
+  // Issuing a new code revokes the previous one
+  const reissued = requestFreshBookingVerificationCode({
+    bookingReference: verifyPayRes.booking.bookingReference,
+    emailOrPhone: 'chidinma.okafor@lagosmail.ng',
+  });
+  assert.ok(reissued.ok && reissued.devModeCodePreview);
+  const oldCodeAttempt = verifyBookingWithCode({
+    verificationCode: verifyPayRes.devModeVerificationCode!,
+    ipKey: 'test-client-6-old',
+  });
+  assert.equal(oldCodeAttempt.ok, false, 'Replaced access code must be rejected');
+  const newCodeAttempt = verifyBookingWithCode({
+    verificationCode: reissued.ok ? reissued.devModeCodePreview! : '',
+    ipKey: 'test-client-6-new',
+  });
+  assert.equal(newCodeAttempt.ok, true, 'Newest access code must work');
 
   // Customer session can access private receipt
   const customerReceiptAccess = getPrivateReceiptRecord(validReceiptUpload.receiptKey, {

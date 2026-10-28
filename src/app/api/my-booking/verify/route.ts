@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const forwardedFor = request.headers.get('x-forwarded-for');
     const clientIp = forwardedFor ? forwardedFor.split(',')[0].trim() : 'local-client';
-    const rateLimitKey = `${clientIp}:${(body.bookingReference || 'any').toUpperCase()}`;
+    const rateLimitKey = `${clientIp}:booking-access`;
 
     const result = verifyBookingAccessCode({
       verificationCode: body.verificationCode || body.code || '',

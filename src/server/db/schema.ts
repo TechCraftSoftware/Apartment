@@ -225,7 +225,7 @@ export interface NotificationRecord {
    * verification code when no live email/SMS gateway is configured.
    */
   devModeCodePreview: string | null;
-  deliveryStatus: 'Sent' | 'SimulatedInDev' | 'Failed';
+  deliveryStatus: 'Queued' | 'Sent' | 'SimulatedInDev' | 'Failed';
   createdAt: string;
 }
 

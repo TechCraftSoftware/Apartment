@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   CreditCard,
   ShieldCheck,
@@ -42,6 +42,7 @@ interface InitializedPaymentState {
 export default function PaymentInitiationPage() {
   const params = useParams<{ bookingId: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     bookings,
     apartments,
@@ -73,6 +74,60 @@ export default function PaymentInitiationPage() {
     return (
       <div className="max-w-4xl mx-auto px-4 py-20">
         <LoadingState />
+      </div>
+    );
+  }
+
+  // Simulated Paystack checkout for a new booking: the booking record is only
+  // created after the payment is verified, so we only have a checkout id here.
+  const simulatedCheckoutReference =
+    searchParams.get('checkout') === 'simulated' ? searchParams.get('reference') : null;
+
+  if (!booking && simulatedCheckoutReference) {
+    const goToCallback = (outcome: 'success' | 'failed') =>
+      router.push(
+        `/payment/callback?reference=${encodeURIComponent(
+          simulatedCheckoutReference
+        )}&checkoutId=${encodeURIComponent(bookingId)}&outcome=${outcome}&channel=card`
+      );
+
+    return (
+      <div className="max-w-lg mx-auto px-4 py-16">
+        <div className="bg-white rounded-3xl border border-stone-200/90 shadow-md p-6 sm:p-8 space-y-5 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto">
+            <CreditCard className="w-6 h-6" />
+          </div>
+          <div className="space-y-1.5">
+            <span className="inline-block px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 text-[11px] font-bold uppercase tracking-wider">
+              Simulated Paystack Checkout (Test Mode)
+            </span>
+            <h1 className="font-serif text-2xl font-bold text-stone-900">
+              Complete Your Payment
+            </h1>
+            <p className="text-xs text-stone-600">
+              Reference{' '}
+              <code className="font-mono font-semibold">{simulatedCheckoutReference}</code>
+            </p>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            <button
+              type="button"
+              onClick={() => goToCallback('success')}
+              className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold cursor-pointer"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Simulate Successful Payment</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => goToCallback('failed')}
+              className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-sm font-semibold cursor-pointer"
+            >
+              <XCircle className="w-4 h-4" />
+              <span>Simulate Declined Payment</span>
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

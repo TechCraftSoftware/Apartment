@@ -24,7 +24,9 @@ import {
   findOrCreateCustomerInTransaction,
   issueBookingVerificationCredentialInTransaction,
   getVerifiedBookingBySessionToken,
+  buildCustomerBookingVerifiedView,
 } from './customerAndVerificationService';
+import { isEmailDeliveryConfigured, queueBookingEmail } from './emailService';
 
 export function getPublicMarketplaceListings(): ApartmentUnitRecord[] {
   const db = readDatabase();
@@ -440,7 +442,8 @@ export function updateBookingStatus(
     }
     booking.updatedAt = nowIso;
 
-    db.notifications.unshift({
+    const sendConfirmationEmail = newStatus === 'Confirmed' && isEmailDeliveryConfigured();
+    const statusNotification = {
       id: `notif-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
       clientId: db.realtorConfig.clientId,
       bookingId: booking.id,
@@ -448,14 +451,29 @@ export function updateBookingStatus(
       customerId: booking.customerId || 'cust-unknown',
       recipientEmail: booking.guestEmail,
       recipientPhone: booking.guestPhone,
-      channel: 'Both',
-      template: 'BOOKING_STATUS_UPDATED',
-      subject: `Booking ${booking.bookingReference} Status Updated to ${booking.status}`,
+      channel: 'Both' as const,
+      template: 'BOOKING_STATUS_UPDATED' as const,
+      subject:
+        newStatus === 'Confirmed'
+          ? `Your booking ${booking.bookingReference} is confirmed — ${db.realtorConfig.businessName}`
+          : `Booking ${booking.bookingReference} Status Updated to ${booking.status}`,
       messagePreview: `Dear ${booking.guestName}, your booking ${booking.bookingReference} is now ${booking.status} (Payment status: ${booking.paymentStatus}).`,
       devModeCodePreview: null,
-      deliveryStatus: 'SimulatedInDev',
+      deliveryStatus: sendConfirmationEmail ? ('Queued' as const) : ('SimulatedInDev' as const),
       createdAt: nowIso,
-    });
+    };
+    db.notifications.unshift(statusNotification);
+
+    if (sendConfirmationEmail) {
+      queueBookingEmail({
+        kind: 'BOOKING_CONFIRMED',
+        notificationId: statusNotification.id,
+        recipientEmail: booking.guestEmail,
+        subject: statusNotification.subject,
+        accessCode: null,
+        booking: buildCustomerBookingVerifiedView(db, booking),
+      });
+    }
 
     db.auditLogs.unshift({
       id: `aud-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,

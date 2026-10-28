@@ -14,6 +14,7 @@ import {
 import { updateRealtorClientConfig } from '@/server/services/realtorConfigService';
 import { adminReissueBookingVerificationCode } from '@/server/services/customerAndVerificationService';
 import { resetDatabaseToSeed } from '@/server/db/database';
+import { deliverQueuedBookingEmails } from '@/server/services/emailService';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
     switch (body.action) {
       case 'CREATE_BOOKING': {
         const res = createCustomerBookingRequest(body.booking || body);
+        await deliverQueuedBookingEmails();
         if (!res.ok) {
           return NextResponse.json({ error: res.error }, { status: res.status });
         }
@@ -52,6 +54,7 @@ export async function POST(request: Request) {
 
       case 'CREATE_EXTERNAL_BOOKING': {
         const res = createExternalBookingByAdmin(actorUserId, body.booking || body);
+        await deliverQueuedBookingEmails();
         if (!res.ok) {
           return NextResponse.json({ error: res.error }, { status: res.status });
         }
@@ -69,6 +72,7 @@ export async function POST(request: Request) {
           body.adminNotes,
           body.paymentStatus
         );
+        await deliverQueuedBookingEmails();
         if (!res.ok) {
           return NextResponse.json({ error: res.error }, { status: res.status });
         }
@@ -96,6 +100,7 @@ export async function POST(request: Request) {
 
       case 'REISSUE_VERIFICATION_CODE': {
         const res = adminReissueBookingVerificationCode(actorUserId, body.bookingId);
+        await deliverQueuedBookingEmails();
         if (!res.ok) {
           return NextResponse.json({ error: res.error }, { status: res.status });
         }

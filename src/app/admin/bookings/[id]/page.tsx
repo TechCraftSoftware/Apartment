@@ -227,7 +227,7 @@ export default function AdminBookingDetailPage() {
           setReissuedCodePreview(res.devModeCodePreview);
         }
         setActionMessage(
-          `Fresh one-time verification code generated and sent to ${booking.guestEmail}.`
+          `New booking access code generated and sent to ${booking.guestEmail}. The previous code no longer works.`
         );
       }
     } finally {
@@ -757,23 +757,21 @@ export default function AdminBookingDetailPage() {
                   Customer Booking Access
                 </h3>
                 <p className="text-[11px] text-stone-500">
-                  One-time SHA-256 hashed verification code
+                  Reusable code, emailed to the guest
                 </p>
               </div>
             </div>
 
             <p className="text-xs text-stone-600 leading-relaxed">
-              Customers do not need a password or account. They verify access on{' '}
+              Customers do not need a password or account. They open{' '}
               <Link
-                href={`/my-booking?ref=${encodeURIComponent(
-                  booking.reference
-                )}`}
+                href="/my-booking"
                 className="font-semibold text-brand-800 hover:underline"
               >
                 /my-booking
               </Link>{' '}
-              using their Booking Reference, Email/Phone, and 6-digit one-time
-              verification code.
+              and enter the access code from their booking email. Re-issuing a
+              code emails a new one and disables the old one.
             </p>
 
             {activeDevCode && (
@@ -786,11 +784,7 @@ export default function AdminBookingDetailPage() {
                     {activeDevCode}
                   </span>
                   <Link
-                    href={`/my-booking?ref=${encodeURIComponent(
-                      booking.reference
-                    )}&email=${encodeURIComponent(
-                      booking.guestEmail
-                    )}&code=${encodeURIComponent(activeDevCode)}`}
+                    href={`/my-booking?code=${encodeURIComponent(activeDevCode)}`}
                     className="text-[11px] font-semibold text-brand-800 hover:underline"
                   >
                     Test in /my-booking →

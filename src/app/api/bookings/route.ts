@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createCustomerBookingRequest } from '@/server/services/marketplaceService';
+import { deliverQueuedBookingEmails } from '@/server/services/emailService';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +8,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const result = createCustomerBookingRequest(body);
+    await deliverQueuedBookingEmails();
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });

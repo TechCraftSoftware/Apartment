@@ -511,8 +511,8 @@ function BookingFormContent() {
                   <span>Guest Contact Information</span>
                 </h2>
                 <p className="text-xs text-stone-500 mt-0.5">
-                  No login required. Your customer account will be created automatically, and your
-                  secure 6-digit booking-access code will be issued to view your reservation.
+                  No login required. We&apos;ll email your booking details and a personal access
+                  code you can use any time to view your reservation.
                 </p>
               </div>
               <button

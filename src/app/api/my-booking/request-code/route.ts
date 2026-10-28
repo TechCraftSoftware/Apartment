@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requestFreshBookingVerificationCode } from '@/server/services/customerAndVerificationService';
+import { deliverQueuedBookingEmails } from '@/server/services/emailService';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,7 @@ export async function POST(request: Request) {
       bookingReference: body.bookingReference || '',
       emailOrPhone: body.emailOrPhone || body.contact || '',
     });
+    await deliverQueuedBookingEmails();
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });

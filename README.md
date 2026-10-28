@@ -18,12 +18,15 @@ Designed and operated for **one realtor client** (`Verdant Stays Lagos`, `client
 ### B. Passwordless Customer Creation & Code-Based Booking Access (`/my-booking`)
 - **No Customer Login Required**: Customers never create a password or sign in to book an apartment.
 - **Automatic Customer Record**: Submitting a booking automatically creates or matches a `CustomerRecord` by normalized email and phone number.
-- **Cryptographically Generated One-Time Verification Code**:
-  - Upon booking creation (or code re-request), the server generates a 6-digit verification code (`crypto.randomInt(100000, 1000000)`).
-  - **Only the SHA-256 hash (`codeHash`)** is stored in `BookingAccessCredentialRecord` along with `expiresAt`, `usedAt`, `failedAttempts`, and `lockedUntil`.
-  - Customers visit **`/my-booking`** and submit their `Booking Reference` + `Email or Phone` + `6-digit Verification Code`.
-  - Once verified, the one-time code is immediately marked as used (`usedAt`) and exchanged for a short-lived `BookingAccessSession` token so the customer can view their reservation status, payment summary, check-in instructions, or cancel an eligible booking.
-  - **Development Outbox Preview**: In local/test mode, the generated verification code is displayed in a clearly labelled *Development Mode Verification Code Outbox Preview* on `/booking-confirmation/[id]` and `/my-booking` so evaluators can test the flow immediately without an external SMTP/SMS gateway.
+- **Reusable Booking Access Code (emailed)**:
+  - When a booking is created (after Paystack payment, bank-transfer submission, or an admin entry), the server generates an 8-character access code such as `K7P4-9QXM` (`crypto.randomInt` over an unambiguous alphabet).
+  - **Only the SHA-256 hash (`codeHash`)** is stored in `BookingAccessCredentialRecord`. The code stays valid until 30 days after check-out.
+  - The customer receives an email with the code **and** their booking details (apartment, dates, guests, amounts, status). A second email is sent when an admin confirms the booking, including check-in instructions.
+  - On **`/my-booking`** the customer enters just the code, as often as they like, to view the booking. They can print it, save it as PDF, or copy the details to share with whoever needs to see them.
+  - Lost codes: the customer enters their booking reference plus booking email/phone to get a new code emailed. Issuing a new code disables the old one.
+  - Wrong-code attempts are rate limited (5 per 15 minutes per client).
+- **Email delivery (SMTP)**: Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` and `EMAIL_FROM` in `.env.local` (see `.env.example`). Emails are sent after the booking is saved, so an SMTP failure never loses a booking; the notification is marked `Failed` and the error is logged.
+  - **Development Outbox Preview**: With no `SMTP_HOST`, nothing is emailed and the code is shown in a clearly labelled development preview on `/booking-confirmation/[id]` and `/my-booking` (hidden in production builds).
 
 ### C. Paystack Test Mode Payment Flow (`/payment/[bookingId]` & `/payment/callback`)
 - **Nigerian Naira (`NGN`) & Kobo Precision**: All Paystack payloads calculate `amountKobo = Math.round(amountNaira * 100)`.
@@ -77,7 +80,7 @@ npm run build
 - **Sample Seeded Bookings for `/my-booking` Verification**:
   - **Booking Reference**: `BK-2026-8421`
     - Email: `adaeze.nwosu@lagosmail.ng` | Phone: `+234 803 412 8890`
-    - Demo Verification Code: `842101`
+    - Demo Access Code: `842101`
   - **Booking Reference**: `BK-2026-9104` (Pending & Unpaid — great for testing Paystack Test Mode checkout!)
     - Email: `tunde.bakare@victoriafinance.com` | Phone: `+234 809 221 6743`
-    - Demo Verification Code: `910402`
+    - Demo Access Code: `910402`

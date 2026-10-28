@@ -116,7 +116,7 @@ export default function AdminRealtorSettingsPage() {
         </h1>
         <p className="text-sm text-stone-600 mt-1">
           Configure public branding, Paystack booking payment policy, and
-          one-time verification code security settings for this realtor client.
+          booking access code settings for this realtor client.
         </p>
       </div>
 
@@ -370,19 +370,12 @@ export default function AdminRealtorSettingsPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">
-                Verification Code Expiry (Minutes)
-              </label>
-              <input
-                type="number"
-                min={5}
-                max={1440}
-                value={verificationCodeExpiryMinutes}
-                onChange={(e) =>
-                  setVerificationCodeExpiryMinutes(Number(e.target.value))
-                }
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-              />
+              <span className="block text-xs font-semibold text-stone-700 mb-1">
+                Booking Access Code Validity
+              </span>
+              <p className="px-3.5 py-2.5 rounded-xl border border-stone-200 bg-stone-50 text-sm text-stone-700">
+                Reusable until 30 days after check-out
+              </p>
             </div>
 
             <div>

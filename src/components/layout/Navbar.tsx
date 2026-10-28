@@ -30,7 +30,7 @@ export function Navbar() {
     realtorConfig.businessName.split('&')[0]?.trim() || 'Verdant Stays';
 
   return (
-    <header className="sticky top-0 z-40 bg-sand-50/95 backdrop-blur-md border-b border-stone-200/80">
+    <header className="print:hidden sticky top-0 z-40 bg-sand-50/95 backdrop-blur-md border-b border-stone-200/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
         {/* Brand Logo */}
         <Link
