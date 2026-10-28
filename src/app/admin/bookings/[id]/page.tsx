@@ -43,6 +43,7 @@ import {
   formatDisplayDate,
   formatNaira,
 } from '@/lib/utils';
+import { describePayment } from '@/lib/payments';
 
 export default function AdminBookingDetailPage() {
   const params = useParams<{ id: string }>();
@@ -56,6 +57,7 @@ export default function AdminBookingDetailPage() {
     updateBookingStatus,
     reissueVerificationCode,
     reviewBankTransferReceipt,
+    recordOfflinePayment,
   } = useBookingContext();
 
   const bookingId = params?.id || '';
@@ -75,6 +77,10 @@ export default function AdminBookingDetailPage() {
   const [isReviewingReceipt, setIsReviewingReceipt] = useState(false);
   const [rejectReceiptModalOpen, setRejectReceiptModalOpen] = useState(false);
   const [receiptRejectionReason, setReceiptRejectionReason] = useState('');
+  const [recordAmount, setRecordAmount] = useState('');
+  const [recordChannel, setRecordChannel] = useState<'cash' | 'pos' | 'bank_transfer'>('cash');
+  const [recordNote, setRecordNote] = useState('');
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const [dialogState, setDialogState] = useState<{
     isOpen: boolean;
     targetStatus: BookingStatus;
@@ -99,6 +105,13 @@ export default function AdminBookingDetailPage() {
   const apartment = apartments.find((a) => a.id === booking.apartmentId);
   const nights = calculateNights(booking.checkIn, booking.checkOut);
   const bookingPayments = payments.filter((p) => p.bookingId === booking.id);
+  const pendingTransfer = bookingPayments.find(
+    (p) => p.paymentMethod === 'BankTransfer' && p.receiptVerificationStatus === 'PendingReview'
+  );
+  const balanceDue =
+    booking.balanceAmount ?? Math.max(0, booking.totalAmount - (booking.amountPaid || 0));
+  const canRecordPayment =
+    balanceDue > 0 && !['Cancelled', 'Rejected', 'Expired'].includes(booking.status);
   const activeDevCode =
     reissuedCodePreview ||
     devVerificationCodes[booking.reference] ||
@@ -121,29 +134,29 @@ export default function AdminBookingDetailPage() {
     setActionError(null);
     setActionMessage(null);
 
-    // Enforcement of payment conditions before confirming
-    if (booking.paymentMethod === 'BankTransfer') {
-      if (booking.receiptVerificationStatus !== 'Verified' || booking.paymentStatus !== 'Paid') {
-        setActionError(
-          'Cannot confirm a Bank Transfer booking until the transfer receipt has been verified and payment marked as Paid.'
-        );
-        return;
-      }
-    } else {
-      // Paystack
-      if (booking.paymentStatus !== 'Paid') {
-        setActionError(
-          'Cannot confirm a Paystack booking until payment has been verified server-side.'
-        );
-        return;
-      }
+    // Payment conditions before confirming (mirrors the server rule)
+    if (pendingTransfer || booking.receiptVerificationStatus === 'PendingReview') {
+      setActionError(
+        'A bank transfer receipt is waiting for review. Verify or reject it before confirming the booking.'
+      );
+      return;
+    }
+    if (booking.paymentStatus !== 'Paid' && booking.paymentStatus !== 'Partially Paid') {
+      setActionError(
+        'No payment has been received for this booking yet. Record or verify a payment before confirming.'
+      );
+      return;
     }
 
     const res = await updateBookingStatus(booking.id, 'Confirmed');
     if (!res.success && res.error) {
       setActionError(res.error);
     } else {
-      setActionMessage('Booking confirmed and dates locked on calendar.');
+      setActionMessage(
+        balanceDue > 0
+          ? `Booking confirmed. The guest still owes ${formatNaira(balanceDue)}.`
+          : 'Booking confirmed and dates locked on calendar.'
+      );
     }
   };
 
@@ -156,7 +169,7 @@ export default function AdminBookingDetailPage() {
     if (!res.success) {
       setActionError(res.error || 'Failed to verify transfer receipt.');
     } else {
-      setActionMessage('Bank transfer receipt verified and payment marked as Paid.');
+      setActionMessage('Transfer verified and added to the amount paid.');
     }
   };
 
@@ -181,6 +194,27 @@ export default function AdminBookingDetailPage() {
     } else {
       setActionMessage('Bank transfer receipt rejected.');
     }
+  };
+
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setActionError(null);
+    setActionMessage(null);
+    setIsRecordingPayment(true);
+    const res = await recordOfflinePayment(
+      booking.id,
+      Number(recordAmount),
+      recordChannel,
+      recordNote.trim() || undefined
+    );
+    setIsRecordingPayment(false);
+    if (!res.success) {
+      setActionError(res.error || 'Could not record payment.');
+      return;
+    }
+    setRecordAmount('');
+    setRecordNote('');
+    setActionMessage('Payment recorded.');
   };
 
   const handleMarkCompleted = async () => {
@@ -475,19 +509,22 @@ export default function AdminBookingDetailPage() {
               </h2>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-stone-500">Payment Status:</span>
-                <select
-                  value={booking.paymentStatus || 'Unpaid'}
-                  onChange={(e) =>
-                    handlePaymentStatusUpdate(e.target.value as PaymentStatus)
-                  }
-                  className="px-2.5 py-1 rounded-lg border border-stone-300 bg-stone-50 text-xs font-semibold text-stone-800 focus:outline-none focus:ring-2 focus:ring-brand-600"
-                >
-                  <option value="Unpaid">Unpaid</option>
-                  <option value="DepositPaid">DepositPaid</option>
-                  <option value="Paid">Paid</option>
-                  <option value="Failed">Failed</option>
-                  <option value="Refunded">Refunded</option>
-                </select>
+                <PaymentStatusBadge status={booking.paymentStatus || 'Unpaid'} />
+                {(booking.amountPaid || 0) > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handlePaymentStatusUpdate(e.target.value as PaymentStatus);
+                      }
+                    }}
+                    className="px-2.5 py-1 rounded-lg border border-stone-300 bg-stone-50 text-xs font-semibold text-stone-800 focus:outline-none focus:ring-2 focus:ring-brand-600"
+                  >
+                    <option value="">Mark refund…</option>
+                    <option value="Refunded">Refunded (full)</option>
+                    <option value="Partially Refunded">Partially refunded</option>
+                  </select>
+                )}
               </div>
             </div>
 
@@ -560,159 +597,209 @@ export default function AdminBookingDetailPage() {
             </div>
           </div>
 
-          {/* Bank Transfer Receipt Verification (If Bank Transfer) */}
-          {booking.paymentMethod === 'BankTransfer' && (
-            <div className="bg-white rounded-2xl border border-stone-200/90 p-6 shadow-xs space-y-4">
+          {/* Transfer receipt waiting for review (any booking can have one) */}
+          {pendingTransfer && (
+            <div className="bg-white rounded-2xl border-2 border-amber-300 p-6 shadow-xs space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 pb-3">
                 <div className="flex items-center gap-2">
-                  <Landmark className="w-5 h-5 text-brand-700" />
+                  <Landmark className="w-5 h-5 text-amber-700" />
                   <h2 className="text-base font-bold text-stone-900">
-                    Bank Transfer Proof of Payment
+                    Transfer Receipt Waiting for Review
                   </h2>
                 </div>
-                <ReceiptStatusBadge
-                  status={booking.receiptVerificationStatus || 'PendingReview'}
-                />
+                <ReceiptStatusBadge status="PendingReview" />
               </div>
 
-              {booking.receiptStorageKey ? (
-                <div className="space-y-4">
-                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/80 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-sand-200 text-stone-800 flex items-center justify-center shrink-0">
-                        <FileText className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-stone-900">
-                          Proof of Payment Receipt Available
-                        </p>
-                        <p className="text-[11px] text-stone-500 font-mono">
-                          Storage Key: {booking.receiptStorageKey}
-                        </p>
-                      </div>
-                    </div>
-
-                    <a
-                      href={`/api/receipts/${booking.receiptStorageKey}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-800 hover:bg-brand-900 text-white text-xs font-semibold transition-colors shadow-2xs"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>View Uploaded Receipt</span>
-                    </a>
-                  </div>
-
-                  {booking.receiptVerificationStatus === 'Rejected' && booking.rejectionReason && (
-                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900">
-                      <span className="font-bold block">Rejection Note:</span>
-                      <p className="mt-0.5">{booking.rejectionReason}</p>
-                    </div>
-                  )}
-
-                  {booking.receiptVerificationStatus === 'Verified' ? (
-                    <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>
-                          <strong>Receipt Verified:</strong> Transfer payment of {formatNaira(booking.totalAmount)} confirmed. Booking is eligible for administrator approval.
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setRejectReceiptModalOpen(true)}
-                        className="text-[11px] font-semibold text-stone-600 hover:text-red-700 underline shrink-0 cursor-pointer"
-                      >
-                        Re-review / Reject
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-3 pt-1">
-                      <button
-                        type="button"
-                        disabled={isReviewingReceipt}
-                        onClick={handleVerifyReceipt}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold transition-colors cursor-pointer shadow-xs"
-                      >
-                        <FileCheck className="w-4 h-4" />
-                        <span>{isReviewingReceipt ? 'Processing...' : 'Verify Receipt (Mark Payment Paid)'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={isReviewingReceipt}
-                        onClick={() => setRejectReceiptModalOpen(true)}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold transition-colors cursor-pointer"
-                      >
-                        <FileX className="w-4 h-4" />
-                        <span>Reject Receipt</span>
-                      </button>
-                    </div>
-                  )}
+              <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/80 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-stone-500">Guest says they transferred</p>
+                  <p className="text-xl font-bold text-stone-900">
+                    {formatNaira(pendingTransfer.amount)}
+                  </p>
+                  <p className="text-[11px] text-stone-500 mt-0.5">
+                    Uploaded {new Date(pendingTransfer.createdAt).toLocaleString()} •{' '}
+                    {describePayment(pendingTransfer).typeLabel}
+                  </p>
                 </div>
-              ) : (
-                <p className="text-xs text-stone-500 bg-stone-50 p-4 rounded-xl border border-stone-200/70">
-                  No bank transfer receipt has been uploaded yet for this booking.
-                </p>
-              )}
+                {pendingTransfer.receiptStorageKey && (
+                  <a
+                    href={`/api/receipts/${pendingTransfer.receiptStorageKey}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-800 hover:bg-brand-900 text-white text-xs font-semibold transition-colors shadow-2xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>View Receipt</span>
+                  </a>
+                )}
+              </div>
+
+              <p className="text-xs text-stone-600">
+                Check your bank account for this amount before verifying. Verifying adds{' '}
+                {formatNaira(pendingTransfer.amount)} to the amount paid.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={isReviewingReceipt}
+                  onClick={handleVerifyReceipt}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+                >
+                  <FileCheck className="w-4 h-4" />
+                  <span>
+                    {isReviewingReceipt
+                      ? 'Processing...'
+                      : `Verify ${formatNaira(pendingTransfer.amount)} Received`}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isReviewingReceipt}
+                  onClick={() => setRejectReceiptModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <FileX className="w-4 h-4" />
+                  <span>Reject Receipt</span>
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Paystack Payment Records for this Booking */}
+          {/* Payment history: card, transfers and admin-recorded payments */}
           <div className="bg-white rounded-2xl border border-stone-200/90 p-6 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
                 <CreditCard className="w-4 h-4 text-brand-700" />
-                Paystack Payment Transactions
+                Payment History
               </h2>
-              <Link
-                href={`/payment/${booking.id}`}
-                className="text-xs font-semibold text-brand-800 hover:underline"
-              >
-                Open Test Payment Page →
-              </Link>
+              <span className="text-xs text-stone-500">
+                Paid {formatNaira(booking.amountPaid || 0)} of {formatNaira(booking.totalAmount)}
+              </span>
             </div>
+
+            {booking.receiptVerificationStatus === 'Rejected' && booking.rejectionReason && (
+              <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900">
+                <span className="font-bold block">Last receipt rejected:</span>
+                <p className="mt-0.5">{booking.rejectionReason}</p>
+              </div>
+            )}
 
             {bookingPayments.length === 0 ? (
               <p className="text-xs text-stone-500 bg-stone-50 p-4 rounded-xl border border-stone-200/70">
-                No Paystack payment transactions have been initiated for this
-                booking yet.
+                No payments have been made for this booking yet.
               </p>
             ) : (
               <div className="space-y-2.5">
-                {bookingPayments.map((pay) => (
-                  <div
-                    key={pay.id}
-                    className="p-3.5 rounded-xl bg-stone-50 border border-stone-200/80 flex flex-wrap items-center justify-between gap-3 text-xs"
-                  >
-                    <div>
-                      <p className="font-mono font-bold text-stone-900">
-                        {pay.reference}
-                      </p>
-                      <p className="text-stone-500 mt-0.5">
-                        {pay.paymentType} • {pay.channel || 'card'} •{' '}
-                        {pay.mode}
-                      </p>
+                {bookingPayments.map((pay) => {
+                  const { typeLabel, methodLabel } = describePayment(pay);
+                  const statusLabel =
+                    pay.receiptVerificationStatus === 'PendingReview'
+                      ? 'Awaiting review'
+                      : pay.status === 'Success'
+                        ? 'Received'
+                        : pay.status === 'Pending' || pay.status === 'Initiated'
+                          ? 'Not completed'
+                          : pay.status;
+                  return (
+                    <div
+                      key={pay.id}
+                      className="p-3.5 rounded-xl bg-stone-50 border border-stone-200/80 flex flex-wrap items-center justify-between gap-3 text-xs"
+                    >
+                      <div>
+                        <p className="font-semibold text-stone-900">
+                          {typeLabel} • {methodLabel}
+                        </p>
+                        <p className="text-stone-500 mt-0.5">
+                          {new Date(pay.paidAt || pay.createdAt).toLocaleString()} •{' '}
+                          <span className="font-mono">{pay.reference}</span>
+                        </p>
+                        {pay.receiptStorageKey && (
+                          <a
+                            href={`/api/receipts/${pay.receiptStorageKey}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 mt-1 text-brand-800 font-semibold hover:underline"
+                          >
+                            <FileText className="w-3 h-3" />
+                            View receipt
+                          </a>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-stone-900 text-sm">
+                          {formatNaira(pay.amount)}
+                        </p>
+                        <span
+                          className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                            pay.status === 'Success'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : pay.status === 'Failed' || pay.status === 'Rejected'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {statusLabel}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold text-stone-900 text-sm">
-                        {formatNaira(pay.amount)}
-                      </p>
-                      <span
-                        className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          pay.status === 'Success'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : pay.status === 'Failed'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {pay.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
+            )}
+
+            {canRecordPayment && (
+              <form
+                onSubmit={handleRecordPayment}
+                className="pt-4 border-t border-stone-100 space-y-3"
+              >
+                <div>
+                  <p className="text-sm font-bold text-stone-900">Record a payment</p>
+                  <p className="text-xs text-stone-500">
+                    For money received outside the website (cash, POS, or a transfer you
+                    confirmed directly). Balance due: {formatNaira(balanceDue)}.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <input
+                    type="number"
+                    min={1}
+                    max={balanceDue}
+                    step={1}
+                    required
+                    placeholder="Amount (₦)"
+                    value={recordAmount}
+                    onChange={(e) => setRecordAmount(e.target.value)}
+                    className="px-3 py-2.5 rounded-xl border border-stone-300 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
+                  />
+                  <select
+                    value={recordChannel}
+                    onChange={(e) =>
+                      setRecordChannel(e.target.value as 'cash' | 'pos' | 'bank_transfer')
+                    }
+                    className="px-3 py-2.5 rounded-xl border border-stone-300 bg-white text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="pos">POS</option>
+                    <option value="bank_transfer">Bank transfer</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Note (optional)"
+                    value={recordNote}
+                    onChange={(e) => setRecordNote(e.target.value)}
+                    className="px-3 py-2.5 rounded-xl border border-stone-300 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-brand-700"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isRecordingPayment}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-800 hover:bg-brand-900 disabled:opacity-50 text-white text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isRecordingPayment ? 'Saving...' : 'Record Payment'}</span>
+                </button>
+              </form>
             )}
           </div>
 

@@ -17,7 +17,8 @@ import { useBookingContext } from '@/context/BookingContext';
 export function Navbar() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { resetDemoData, realtorConfig, isAdminAuthenticated } = useBookingContext();
+  const { resetDemoData, realtorConfig, isAdminAuthenticated, canResetDemo } =
+    useBookingContext();
 
   const navLinks = [
     { href: '/', label: 'Home' },
@@ -79,10 +80,18 @@ export function Navbar() {
 
         {/* Right Actions */}
         <div className="hidden md:flex items-center gap-2.5">
-          {isAdminAuthenticated && (
+          {isAdminAuthenticated && canResetDemo && (
             <button
               type="button"
-              onClick={resetDemoData}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    'Reset ALL data to the sample demo? Every booking, payment and setting will be replaced.'
+                  )
+                ) {
+                  resetDemoData();
+                }
+              }}
               title="Restore initial sample apartments, bookings, verification codes, and calendar blocks"
               className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium text-stone-600 hover:text-stone-900 hover:bg-stone-200/60 transition-colors"
             >

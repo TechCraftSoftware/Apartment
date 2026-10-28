@@ -9,6 +9,7 @@ import {
   getPublicPlatformState,
   pickPublicBookingInput,
   reviewBankTransferReceipt,
+  recordOfflinePayment,
 } from '../src/server/services/marketplaceService';
 import {
   createBookingCheckoutAttempt,
@@ -35,6 +36,7 @@ import {
 } from '../src/server/services/realtorConfigService';
 import {
   loginAdminUser,
+  changeAdminPassword,
   createAdminSession,
   getAdminBySessionToken,
   revokeAdminSession,
@@ -410,6 +412,92 @@ async function runVerificationSuite() {
   const ptNothingPending = reviewBankTransferReceipt(adminId, ptSubmit.booking.id, 'VERIFY');
   assert.equal(ptNothingPending.ok, false, 'Verifying twice must not double-credit');
   console.log(`✅ [Scenario 3b] Transfer part payment ${ptFirst} of ${ptTotal} verified, balance paid by transfer.`);
+
+  // =========================================================================
+  // SCENARIO 3c: ADMIN TOOLS — APPROVE PART-PAID, RECORD OFFLINE PAYMENT
+  // =========================================================================
+  console.log('\n--- Scenario 3c: Admin Part-Payment Tools ---');
+  const offlineCheckout = createBookingCheckoutAttempt({
+    apartmentId: 'apt-4',
+    guestName: 'Offline Payer',
+    guestEmail: 'offline.payer@example.com',
+    guestPhone: '+234 803 555 0333',
+    checkIn: '2027-06-01',
+    checkOut: '2027-06-03',
+    guests: 1,
+    paymentMethod: 'BankTransfer',
+  });
+  if (!offlineCheckout.ok) throw new Error('Offline checkout failed');
+  const offTotal = offlineCheckout.checkout.totalAmount;
+  const offUpload = uploadBankTransferReceipt(offlineCheckout.checkout.id, {
+    originalFilename: 'offline.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 900,
+    base64Data: Buffer.from('%PDF-1.4 offline part').toString('base64'),
+  });
+  if (!offUpload.ok) throw new Error('Offline upload failed');
+  const offPart = Math.ceil(offTotal * 0.5);
+  const offSubmit = submitBankTransferCheckout({
+    checkoutAttemptId: offlineCheckout.checkout.id,
+    receiptKey: offUpload.receiptKey,
+    transferAmount: offPart,
+  });
+  if (!offSubmit.ok) throw new Error('Offline submit failed');
+  const offId = offSubmit.booking.id;
+
+  const confirmWhilePending = updateBookingStatus(adminId, offId, 'Confirmed');
+  assert.equal(confirmWhilePending.ok, false, 'Cannot confirm while a receipt awaits review');
+  assert.equal(reviewBankTransferReceipt(adminId, offId, 'VERIFY').ok, true);
+  const confirmPartPaid = updateBookingStatus(adminId, offId, 'Confirmed');
+  assert.equal(confirmPartPaid.ok, true, 'Part-paid bookings can be confirmed');
+
+  const tooMuch = recordOfflinePayment(adminId, offId, { amount: offTotal, channel: 'cash' });
+  assert.equal(tooMuch.ok, false, 'Cannot record more than the balance');
+  const notAdmin = recordOfflinePayment('usr-nobody', offId, { amount: 1000, channel: 'cash' });
+  assert.equal(notAdmin.ok, false, 'Only admins can record payments');
+  const cashRes = recordOfflinePayment(adminId, offId, {
+    amount: offTotal - offPart,
+    channel: 'pos',
+    note: 'Paid at check-in',
+  });
+  assert.equal(cashRes.ok, true);
+  if (!cashRes.ok) throw new Error('Record payment failed');
+  assert.equal(cashRes.booking.paymentStatus, 'Paid');
+  assert.equal(cashRes.booking.amountPaid, offTotal);
+  assert.equal(cashRes.payment.status, 'Success');
+
+  const external = createExternalBookingByAdmin(adminId, {
+    apartmentId: 'apt-5',
+    guestName: 'WhatsApp Guest',
+    guestEmail: 'whatsapp.guest@example.com',
+    guestPhone: '+234 803 555 0444',
+    checkIn: '2027-07-01',
+    checkOut: '2027-07-03',
+    guests: 1,
+    source: 'WHATSAPP',
+    amountPaid: 50000,
+  });
+  assert.equal(external.ok, true);
+  if (!external.ok) throw new Error('External booking failed');
+  assert.equal(external.booking.paymentStatus, 'Partially Paid');
+  assert.equal(external.booking.amountPaid, 50000);
+  assert.ok(
+    readDatabase().payments.some((p) => p.bookingId === external.booking.id && p.amount === 50000),
+    'External booking money shows in the payment history'
+  );
+
+  // Admin password: hashed after first login, changeable, old one stops working
+  const dbAfterLogin = readDatabase();
+  assert.ok(
+    dbAfterLogin.adminUsers[0].passwordHash.startsWith('scrypt$'),
+    'Admin password is stored hashed after login'
+  );
+  assert.equal(changeAdminPassword(adminId, 'wrong-password', 'NewPass123!').ok, false);
+  assert.equal(changeAdminPassword(adminId, 'Admin123!', 'NewPass123!').ok, true);
+  assert.equal(loginAdminUser('admin@staydemo.com', 'Admin123!').ok, false);
+  assert.equal(loginAdminUser('admin@staydemo.com', 'NewPass123!').ok, true);
+  assert.equal(changeAdminPassword(adminId, 'NewPass123!', 'Admin123!').ok, true);
+  console.log('✅ [Scenario 3c] Part-paid approval, offline payments, external part payment and password change work.');
 
   // =========================================================================
   // SCENARIO 4: BANK TRANSFER APPROVAL RULES

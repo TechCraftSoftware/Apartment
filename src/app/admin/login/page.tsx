@@ -16,6 +16,9 @@ import {
 import { useBookingContext } from '@/context/BookingContext';
 import { LoadingState } from '@/components/ui/LoadingState';
 
+// Demo sign-in hints are for local development only; never shown on the live site.
+const SHOW_DEMO_CREDENTIALS = process.env.NODE_ENV !== 'production';
+
 function AdminLoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -23,8 +26,8 @@ function AdminLoginContent() {
 
   const redirectPath = searchParams.get('redirect') || '/admin';
 
-  const [email, setEmail] = useState('admin@staydemo.com');
-  const [password, setPassword] = useState('Admin123!');
+  const [email, setEmail] = useState(SHOW_DEMO_CREDENTIALS ? 'admin@staydemo.com' : '');
+  const [password, setPassword] = useState(SHOW_DEMO_CREDENTIALS ? 'Admin123!' : '');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -84,7 +87,8 @@ function AdminLoginContent() {
             </div>
           </div>
 
-          {/* Demo Credentials Box */}
+          {/* Demo Credentials Box (development only) */}
+          {SHOW_DEMO_CREDENTIALS && (
           <div className="p-4 rounded-2xl bg-sand-100 border border-stone-200/90 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
@@ -108,6 +112,7 @@ function AdminLoginContent() {
               </div>
             </div>
           </div>
+          )}
 
           {error && (
             <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-2.5">
@@ -170,10 +175,9 @@ function AdminLoginContent() {
           <div className="pt-4 border-t border-stone-100 flex items-start gap-2.5 text-[11px] text-stone-500 leading-relaxed">
             <ShieldAlert className="w-4 h-4 text-stone-400 shrink-0 mt-0.5" />
             <span>
-              <strong>Prototype Notice:</strong> This login screen uses a
-              client-side simulated session stored in LocalStorage for
-              demonstration purposes. Production deployments must enforce
-              authentication and authorization on the server.
+              Staff access only. Sessions are kept on the server and expire after
+              12 hours. Change the default password from Settings after your first
+              sign-in.
             </span>
           </div>
         </div>

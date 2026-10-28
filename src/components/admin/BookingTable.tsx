@@ -53,15 +53,15 @@ export function BookingTable({
   };
 
   const handleDirectApprove = async (booking: Booking) => {
-    if (booking.paymentMethod === 'BankTransfer' && booking.receiptVerificationStatus !== 'Verified') {
+    if (booking.receiptVerificationStatus === 'PendingReview') {
       alert(
-        'Cannot confirm booking: Bank transfer receipt must be verified first by an administrator. Please open the booking details to review the receipt.'
+        'Cannot confirm yet: a bank transfer receipt is waiting for review. Open the booking to verify or reject it.'
       );
       return;
     }
-    if (booking.paymentMethod === 'Paystack' && booking.paymentStatus !== 'Paid') {
+    if (booking.paymentStatus !== 'Paid' && booking.paymentStatus !== 'Partially Paid') {
       alert(
-        'Cannot confirm booking: Paystack payment has not been successfully verified server-side.'
+        'Cannot confirm yet: no payment has been received. Open the booking to record or verify a payment.'
       );
       return;
     }
@@ -191,7 +191,7 @@ export function BookingTable({
                           status={bk.paymentStatus || 'Unpaid'}
                           size="sm"
                         />
-                        {bk.paymentMethod === 'BankTransfer' && (
+                        {bk.receiptVerificationStatus === 'PendingReview' && (
                           <ReceiptStatusBadge
                             status={bk.receiptVerificationStatus || 'PendingReview'}
                             size="sm"

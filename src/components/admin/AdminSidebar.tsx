@@ -33,13 +33,16 @@ export function AdminSidebar({ mobileOpen, onCloseMobile }: AdminSidebarProps) {
     realtorConfig,
     logoutAdmin,
     resetDemoData,
+    currentAdmin,
+    canResetDemo,
   } = useBookingContext();
 
   const pendingBookingCount = bookings.filter(
-    (b) => b.status === 'Pending'
+    (b) => b.status === 'Pending' || b.status === 'PendingApproval'
   ).length;
+  // Transfer receipts waiting for the admin to check them.
   const pendingPaymentCount = payments.filter(
-    (p) => p.status === 'Pending' || p.status === 'Initiated'
+    (p) => p.receiptVerificationStatus === 'PendingReview'
   ).length;
 
   const navItems = [
@@ -70,7 +73,7 @@ export function AdminSidebar({ mobileOpen, onCloseMobile }: AdminSidebarProps) {
     },
     {
       href: '/admin/payments',
-      label: 'Paystack Payments',
+      label: 'Payments',
       icon: CreditCard,
       exact: false,
       badge: pendingPaymentCount > 0 ? pendingPaymentCount : undefined,
@@ -193,17 +196,25 @@ export function AdminSidebar({ mobileOpen, onCloseMobile }: AdminSidebarProps) {
 
       {/* Footer / Session Controls */}
       <div className="p-4 border-t border-brand-900 space-y-2 bg-brand-950">
-        <button
-          type="button"
-          onClick={() => {
-            resetDemoData();
-            onCloseMobile();
-          }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-medium text-stone-300 hover:bg-brand-900 hover:text-white transition-colors"
-        >
-          <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-          <span>Reset Sample Demo Data</span>
-        </button>
+        {canResetDemo && (
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  'Reset ALL data to the sample demo? Every booking, payment and setting will be replaced.'
+                )
+              ) {
+                resetDemoData();
+              }
+              onCloseMobile();
+            }}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-medium text-stone-300 hover:bg-brand-900 hover:text-white transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+            <span>Reset Sample Demo Data</span>
+          </button>
+        )}
 
         <button
           type="button"
@@ -211,7 +222,7 @@ export function AdminSidebar({ mobileOpen, onCloseMobile }: AdminSidebarProps) {
           className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-medium text-rose-300 hover:bg-rose-950/60 hover:text-rose-200 transition-colors"
         >
           <LogOut className="w-3.5 h-3.5 shrink-0" />
-          <span>Sign Out (admin@staydemo.com)</span>
+          <span>Sign Out{currentAdmin ? ` (${currentAdmin.email})` : ''}</span>
         </button>
       </div>
     </div>

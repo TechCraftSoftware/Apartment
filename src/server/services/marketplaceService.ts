@@ -353,10 +353,147 @@ export function createExternalBookingByAdmin(
     return auth;
   }
 
-  return createCustomerBookingRequest({
+  // Money already received for a phone/WhatsApp/walk-in booking is recorded as
+  // a real payment so it shows in the payment history and ledger.
+  const amountReceived = Math.max(0, Math.round(Number(input.amountPaid) || 0));
+  const created = createCustomerBookingRequest({
     ...input,
+    amountPaid: 0,
+    initialPaymentStatus: 'Unpaid',
     source: input.source || 'WHATSAPP',
     initialStatus: input.initialStatus || 'Confirmed',
+  });
+  if (!created.ok || amountReceived <= 0) {
+    return created;
+  }
+
+  const recorded = recordOfflinePayment(auth.actor.id, created.booking.id, {
+    amount: Math.min(amountReceived, created.booking.totalPrice),
+    channel: 'offline',
+    note: `Payment received before the booking was entered (${created.booking.source}).`,
+  });
+  return recorded.ok ? { ...created, booking: recorded.booking } : created;
+}
+
+export type OfflinePaymentChannel = 'cash' | 'pos' | 'bank_transfer' | 'offline';
+
+/**
+ * Admin records money received outside the website (cash, POS, a transfer
+ * that was confirmed directly). Credits the booking and adds a ledger entry.
+ */
+export function recordOfflinePayment(
+  actorUserId: string | undefined,
+  bookingId: string,
+  input: { amount: number; channel?: OfflinePaymentChannel; note?: string }
+):
+  | { ok: true; booking: Booking; payment: PaymentRecord; message: string }
+  | { ok: false; error: string; status: 400 | 401 | 403 | 404 | 409 } {
+  const auth = requireRealtorAdmin(actorUserId);
+  if (!auth.ok) {
+    return auth;
+  }
+
+  return withDatabaseTransaction((db) => {
+    const booking = db.bookings.find((b) => b.id === bookingId);
+    if (!booking) {
+      return { ok: false as const, error: 'Booking not found.', status: 404 as const };
+    }
+
+    const alreadyPaid = booking.amountPaid ?? 0;
+    const balance = Math.max(0, booking.totalPrice - alreadyPaid);
+    const amount = Math.round(Number(input.amount));
+    if (balance <= 0) {
+      return {
+        ok: false as const,
+        error: 'This booking is already paid in full.',
+        status: 409 as const,
+      };
+    }
+    if (!Number.isFinite(amount) || amount <= 0 || amount > balance) {
+      return {
+        ok: false as const,
+        error: `Enter an amount between ₦1 and ₦${balance.toLocaleString()} (the balance due).`,
+        status: 400 as const,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const channel = input.channel || 'offline';
+    const ref = `MAN_${booking.bookingReference.replace(/[^A-Z0-9]/gi, '')}_${Date.now().toString(36).toUpperCase()}`;
+    const newAmountPaid = alreadyPaid + amount;
+    const payment: PaymentRecord = {
+      id: `pay-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`,
+      clientId: db.realtorConfig.clientId,
+      bookingId: booking.id,
+      bookingReference: booking.bookingReference,
+      customerId: booking.customerId || '',
+      paymentMethod: 'BankTransfer',
+      provider: 'BankTransfer',
+      mode: 'BANK_TRANSFER_RECEIPT',
+      reference: ref,
+      providerReference: ref,
+      authorizationUrl: '',
+      accessCode: '',
+      amount,
+      amountKobo: amount * 100,
+      currency: 'NGN',
+      paymentType: newAmountPaid >= booking.totalPrice && alreadyPaid > 0
+        ? 'Balance'
+        : newAmountPaid >= booking.totalPrice
+          ? 'FullPayment'
+          : 'PartPayment',
+      status: 'Success',
+      paymentStatus: 'Paid',
+      receiptVerificationStatus: 'NotApplicable',
+      receiptStorageKey: null,
+      receiptOriginalFilename: null,
+      receiptMimeType: null,
+      verifiedByUserId: auth.actor.id,
+      verifiedAt: nowIso,
+      rejectionReason: null,
+      channel,
+      gatewayResponse: `Recorded by admin (${auth.actor.email})${input.note?.trim() ? `: ${input.note.trim()}` : ''}`,
+      paidAt: nowIso,
+      rawResponseSummary: JSON.stringify({ recordedManually: true }),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    db.payments.unshift(payment);
+
+    booking.amountPaid = newAmountPaid;
+    booking.balanceAmount = Math.max(0, booking.totalPrice - newAmountPaid);
+    booking.paymentStatus = newAmountPaid >= booking.totalPrice ? 'Paid' : 'Partially Paid';
+    booking.updatedAt = nowIso;
+    booking.statusHistory.push({
+      status: booking.status,
+      timestamp: nowIso,
+      note: `Admin recorded a ${channel.replace('_', ' ')} payment of NGN ${amount.toLocaleString()}.`,
+    });
+
+    db.auditLogs.unshift({
+      id: `aud-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
+      clientId: db.realtorConfig.clientId,
+      actorUserId: auth.actor.id,
+      actorEmail: auth.actor.email,
+      actorRole: auth.actor.role,
+      action: 'ADMIN_RECORD_OFFLINE_PAYMENT',
+      targetType: 'PAYMENT',
+      targetId: payment.id,
+      metadataJson: JSON.stringify({
+        bookingReference: booking.bookingReference,
+        amount,
+        channel,
+        note: input.note || '',
+      }),
+      createdAt: nowIso,
+    });
+
+    return {
+      ok: true as const,
+      booking,
+      payment,
+      message: `Recorded NGN ${amount.toLocaleString()} payment for ${booking.bookingReference}.`,
+    };
   });
 }
 

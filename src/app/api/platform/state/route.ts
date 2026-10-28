@@ -8,6 +8,7 @@ import {
   getFullPlatformState,
   getPublicPlatformState,
   pickPublicBookingInput,
+  recordOfflinePayment,
   removeBlockedDateRange,
   reviewBankTransferReceipt,
   saveApartmentListing,
@@ -19,6 +20,15 @@ import { resetDatabaseToSeed, withDatabaseTransaction, readDatabase } from '@/se
 import { deliverQueuedBookingEmails } from '@/server/services/emailService';
 
 export const dynamic = 'force-dynamic';
+
+// Wiping all data is only for demos: always on in development, and in
+// production only when NEXT_PUBLIC_ALLOW_DEMO_RESET=true.
+function isDemoResetAllowed(): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' ||
+    process.env.NEXT_PUBLIC_ALLOW_DEMO_RESET === 'true'
+  );
+}
 
 // Actions any visitor may perform. Everything else requires an admin session.
 const PUBLIC_ACTIONS = new Set(['CREATE_BOOKING']);
@@ -180,7 +190,28 @@ export async function POST(request: Request) {
         });
       }
 
+      case 'RECORD_OFFLINE_PAYMENT': {
+        const res = recordOfflinePayment(actorUserId, body.bookingId, {
+          amount: Number(body.amount),
+          channel: body.channel,
+          note: body.note,
+        });
+        if (!res.ok) {
+          return NextResponse.json({ error: res.error }, { status: res.status });
+        }
+        return NextResponse.json({
+          ...res,
+          state: getFullPlatformState(actorUserId),
+        });
+      }
+
       case 'RESET_DEMO_DATA': {
+        if (!isDemoResetAllowed()) {
+          return NextResponse.json(
+            { error: 'Demo reset is turned off on this site.' },
+            { status: 403 }
+          );
+        }
         // Keep admin sessions so the operator stays signed in after the reset.
         const adminSessions = readDatabase().adminSessions;
         resetDatabaseToSeed();

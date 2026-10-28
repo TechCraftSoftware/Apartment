@@ -172,16 +172,16 @@ export default function AdminDashboardPage() {
               Client: {realtorConfig.businessName} ({realtorConfig.domain})
             </span>
             <span className="text-xs text-stone-600 font-medium">
-              Policy: <strong>{realtorConfig.paymentPolicy}</strong> (
-              {realtorConfig.depositPercentage}% Deposit) • {properties.length}{' '}
+              Part payments from <strong>{realtorConfig.depositPercentage}%</strong> •{' '}
+              {properties.length}{' '}
               Properties • {activeListings} Active Units • Verified Revenue:{' '}
               <strong>{formatNaira(verifiedRevenue)}</strong>
             </span>
           </div>
           <p className="text-xs text-stone-600">
             Customers book without login and view their booking with the
-            reusable access code emailed to them, on <code>/my-booking</code>. Payments run
-            in Paystack Test Mode (NGN / kobo).
+            reusable access code emailed to them, on <code>/my-booking</code>. They pay by
+            card (Paystack) or bank transfer, in full or in parts; you approve every booking.
           </p>
         </div>
 
@@ -191,7 +191,7 @@ export default function AdminDashboardPage() {
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-stone-300 bg-white text-xs font-semibold text-stone-800 hover:border-brand-700"
           >
             <CreditCard className="w-3.5 h-3.5 text-brand-700" />
-            <span>Paystack Ledger</span>
+            <span>Payments Ledger</span>
           </Link>
           <Link
             href="/admin/settings"

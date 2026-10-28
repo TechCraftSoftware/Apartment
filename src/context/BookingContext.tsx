@@ -86,6 +86,10 @@ interface BookingContextValue {
   auditLogs: AuditLogRecord[];
   publicOccupiedIntervals: PublicBookedInterval[];
   isAdminAuthenticated: boolean;
+  /** Signed-in admin (name/email), or null for visitors. */
+  currentAdmin: { id: string; email: string; fullName: string } | null;
+  /** Whether "Reset demo data" is available (dev, or NEXT_PUBLIC_ALLOW_DEMO_RESET=true). */
+  canResetDemo: boolean;
   /**
    * Map of bookingReference -> devModeVerificationCode so evaluators can
    * immediately test /my-booking after creating a booking or from admin re-issue.
@@ -211,6 +215,12 @@ interface BookingContextValue {
     endDate: string
   ) => { success: boolean; removedCount: number; error?: string };
   resetDemoData: () => void;
+  recordOfflinePayment: (
+    bookingId: string,
+    amount: number,
+    channel: 'cash' | 'pos' | 'bank_transfer',
+    note?: string
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 const DEFAULT_SEEDED_CODES: Record<string, string> = {
@@ -256,6 +266,11 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [currentAdmin, setCurrentAdmin] = useState<{
+    id: string;
+    email: string;
+    fullName: string;
+  } | null>(null);
   const [devVerificationCodes, setDevVerificationCodes] =
     useState<Record<string, string>>(DEFAULT_SEEDED_CODES);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -305,12 +320,21 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       payments?: PaymentRecord[];
       notifications?: NotificationRecord[];
       auditLogs?: AuditLogRecord[];
-      currentUser?: { id: string } | null;
+      currentUser?: { id: string; email: string; fullName: string } | null;
       publicOccupiedIntervals?: PublicBookedInterval[];
     }) => {
       if ('currentUser' in data) {
         const isAdmin = Boolean(data.currentUser);
         setIsAdminAuthenticated(isAdmin);
+        setCurrentAdmin(
+          data.currentUser
+            ? {
+                id: data.currentUser.id,
+                email: data.currentUser.email,
+                fullName: data.currentUser.fullName,
+              }
+            : null
+        );
         if (!isAdmin) {
           setBookings([]);
           setBlocks([]);
@@ -901,6 +925,36 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const recordOfflinePayment = async (
+    bookingId: string,
+    amount: number,
+    channel: 'cash' | 'pos' | 'bank_transfer',
+    note?: string
+  ) => {
+    try {
+      const res = await fetch('/api/platform/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'RECORD_OFFLINE_PAYMENT',
+          bookingId,
+          amount,
+          channel,
+          note,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Could not record payment.' };
+      }
+      if (data.state) applyServerState(data.state);
+      addToast({ type: 'success', title: 'Payment Recorded', message: data.message });
+      return { success: true };
+    } catch {
+      return { success: false, error: 'Network error while recording payment.' };
+    }
+  };
+
   const reissueVerificationCode = async (bookingId: string) => {
     try {
       const res = await fetch('/api/platform/state', {
@@ -1388,6 +1442,11 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         removeAvailabilityBlock,
         setDateRangeAvailable,
         resetDemoData,
+        recordOfflinePayment,
+        currentAdmin,
+        canResetDemo:
+          process.env.NODE_ENV !== 'production' ||
+          process.env.NEXT_PUBLIC_ALLOW_DEMO_RESET === 'true',
       }}
     >
       {children}

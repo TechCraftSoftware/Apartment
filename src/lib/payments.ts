@@ -53,3 +53,30 @@ export function resolvePaymentAmount(params: {
 
   return { ok: true, amount, isPartPayment: amount < maxAmount };
 }
+
+/** Human-friendly labels for a payment row in admin lists. */
+export function describePayment(p: {
+  paymentType: string;
+  provider: string;
+  channel: string | null;
+  rawResponseSummary?: string | null;
+}): { typeLabel: string; methodLabel: string } {
+  const typeLabels: Record<string, string> = {
+    FullPayment: 'Full payment',
+    PartPayment: 'Part payment',
+    Balance: 'Balance payment',
+    Deposit: 'Deposit',
+    BankTransfer: 'Full payment',
+    PayAfterApproval: 'Payment',
+  };
+  const recordedByAdmin = (p.rawResponseSummary || '').includes('recordedManually');
+  let methodLabel = 'Card (Paystack)';
+  if (p.provider === 'BankTransfer') {
+    if (!recordedByAdmin) methodLabel = 'Bank transfer (receipt)';
+    else if (p.channel === 'cash') methodLabel = 'Cash (recorded by admin)';
+    else if (p.channel === 'pos') methodLabel = 'POS (recorded by admin)';
+    else if (p.channel === 'bank_transfer') methodLabel = 'Bank transfer (recorded by admin)';
+    else methodLabel = 'Recorded by admin';
+  }
+  return { typeLabel: typeLabels[p.paymentType] || p.paymentType, methodLabel };
+}

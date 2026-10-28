@@ -37,6 +37,55 @@ export function getAdminById(userId: string | undefined): AdminUserRecord | unde
   return db.adminUsers.find((u) => u.id === userId && u.isActive);
 }
 
+const PASSWORD_HASH_PREFIX = 'scrypt$';
+
+export function hashAdminPassword(plain: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(plain, salt, 64).toString('hex');
+  return `${PASSWORD_HASH_PREFIX}${salt}$${hash}`;
+}
+
+/**
+ * Checks a password against a stored value. Older records hold the password
+ * in plain text; those still match once and are re-hashed on login.
+ */
+function verifyAdminPassword(plain: string, stored: string): boolean {
+  if (stored.startsWith(PASSWORD_HASH_PREFIX)) {
+    const [salt, hash] = stored.slice(PASSWORD_HASH_PREFIX.length).split('$');
+    if (!salt || !hash) return false;
+    const expected = Buffer.from(hash, 'hex');
+    const actual = crypto.scryptSync(plain, salt, expected.length);
+    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  }
+  const a = Buffer.from(plain);
+  const b = Buffer.from(stored);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+export function changeAdminPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): { ok: true } | { ok: false; error: string; status: 400 | 401 | 404 } {
+  if (!newPassword || newPassword.length < 8) {
+    return { ok: false, error: 'New password must be at least 8 characters.', status: 400 };
+  }
+  return withDatabaseTransaction((db) => {
+    const user = db.adminUsers.find((u) => u.id === userId);
+    if (!user) {
+      return { ok: false as const, error: 'Administrator not found.', status: 404 as const };
+    }
+    if (!verifyAdminPassword(currentPassword || '', user.passwordHash)) {
+      return { ok: false as const, error: 'Current password is incorrect.', status: 401 as const };
+    }
+    user.passwordHash = hashAdminPassword(newPassword);
+    user.updatedAt = new Date().toISOString();
+    // Sign out all sessions for this account; the caller issues a fresh one.
+    db.adminSessions = db.adminSessions.filter((s) => s.userId !== user.id);
+    return { ok: true as const };
+  });
+}
+
 function hashAdminSessionToken(rawToken: string): string {
   return crypto.createHash('sha256').update(`verdant-admin-session:${rawToken}`).digest('hex');
 }
@@ -149,7 +198,7 @@ export function loginAdminUser(
     (u) => u.email.toLowerCase() === normalizedEmail
   );
 
-  if (!matched || matched.passwordHash !== passwordPlain) {
+  if (!matched || !verifyAdminPassword(passwordPlain, matched.passwordHash)) {
     return {
       ok: false,
       error: 'Invalid administrator email or password credentials.',
@@ -163,6 +212,13 @@ export function loginAdminUser(
       error: 'This administrator account has been deactivated.',
       status: 403,
     };
+  }
+
+  if (!matched.passwordHash.startsWith(PASSWORD_HASH_PREFIX)) {
+    withDatabaseTransaction((tx) => {
+      const user = tx.adminUsers.find((u) => u.id === matched.id);
+      if (user) user.passwordHash = hashAdminPassword(passwordPlain);
+    });
   }
 
   return {

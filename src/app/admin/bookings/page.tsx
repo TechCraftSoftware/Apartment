@@ -16,7 +16,7 @@ import { BookingTable } from '@/components/admin/BookingTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { doDateRangesOverlap } from '@/lib/availability';
-import { addDays, getTodayStr } from '@/lib/utils';
+import { addDays, formatNaira, getTodayStr } from '@/lib/utils';
 
 function AdminBookingsContent() {
   const searchParams = useSearchParams();
@@ -50,6 +50,7 @@ function AdminBookingsContent() {
   const [extGuests, setExtGuests] = useState(2);
   const [extPaymentStatus, setExtPaymentStatus] =
     useState<PaymentStatus>('Paid');
+  const [extAmountReceived, setExtAmountReceived] = useState('');
   const [extNotes, setExtNotes] = useState('');
   const [extError, setExtError] = useState<string | null>(null);
   const [isSubmittingExt, setIsSubmittingExt] = useState(false);
@@ -157,8 +158,15 @@ function AdminBookingsContent() {
       extPaymentStatus === 'Paid'
         ? estimatedTotal
         : extPaymentStatus === 'Partially Paid'
-          ? Math.round(estimatedTotal / 2)
+          ? Math.max(0, Math.round(Number(extAmountReceived) || 0))
           : 0;
+    if (extPaymentStatus === 'Partially Paid' && (amountPaid <= 0 || amountPaid >= estimatedTotal)) {
+      setExtError(
+        `Enter the amount received (more than ₦0 and less than the ${formatNaira(estimatedTotal)} total).`
+      );
+      setIsSubmittingExt(false);
+      return;
+    }
 
     const res = await createExternalBooking({
       apartmentId: extAptId,
@@ -535,9 +543,20 @@ function AdminBookingsContent() {
                     className="w-full rounded-xl border border-stone-300 px-2.5 py-2 text-xs"
                   >
                     <option value="Paid">Paid in Full</option>
-                    <option value="Partially Paid">50% Deposit Paid</option>
+                    <option value="Partially Paid">Part Payment Received</option>
                     <option value="Unpaid">Unpaid (Pay Later)</option>
                   </select>
+                  {extPaymentStatus === 'Partially Paid' && (
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={extAmountReceived}
+                      onChange={(e) => setExtAmountReceived(e.target.value)}
+                      placeholder="Amount received (₦)"
+                      className="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2 text-xs"
+                    />
+                  )}
                 </div>
               </div>
 

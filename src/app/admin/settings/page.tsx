@@ -11,12 +11,57 @@ import {
   Clock,
   Globe,
   Landmark,
+  KeyRound,
 } from 'lucide-react';
 import { useBookingContext } from '@/context/BookingContext';
 import { PaymentPolicyType } from '@/types';
 
 export default function AdminRealtorSettingsPage() {
-  const { realtorConfig, updateRealtorConfig } = useBookingContext();
+  const { realtorConfig, updateRealtorConfig, currentAdmin, addToast } = useBookingContext();
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [savingPassword, setSavingPassword] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    if (newPassword.length < 8) {
+      setPasswordError('New password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('The new passwords do not match.');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      const res = await fetch('/api/auth/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPasswordError(data.error || 'Could not update password.');
+        return;
+      }
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      addToast({
+        type: 'success',
+        title: 'Password Updated',
+        message: 'Use your new password next time you sign in. Other devices were signed out.',
+      });
+    } catch {
+      setPasswordError('Network error while updating password.');
+    } finally {
+      setSavingPassword(false);
+    }
+  };
 
   const [businessName, setBusinessName] = useState(realtorConfig.businessName);
   const [tagline, setTagline] = useState(realtorConfig.tagline);
@@ -242,7 +287,7 @@ export default function AdminRealtorSettingsPage() {
           <div className="flex items-center gap-2 border-b border-stone-100 pb-3">
             <CreditCard className="w-5 h-5 text-brand-700" />
             <h2 className="text-base font-bold text-stone-900">
-              Paystack Payment Policy & Confirmation Rules
+              Payments & Part Payments
             </h2>
           </div>
 
@@ -259,10 +304,10 @@ export default function AdminRealtorSettingsPage() {
                 className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-600"
               >
                 <option value="FullPayment">
-                  Full Payment Online (Auto-Confirms Booking on Paystack Verify)
+                  Pay when booking (guest chooses full or part payment)
                 </option>
                 <option value="Deposit">
-                  Partial Deposit Online (Secures Booking with Deposit %)
+                  Pay when booking (deposit amount suggested first)
                 </option>
                 <option value="PayAfterApproval">
                   Pay After Realtor Approval (Admin Approves First)
@@ -272,7 +317,7 @@ export default function AdminRealtorSettingsPage() {
 
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">
-                Deposit Percentage (%)
+                Minimum First Payment (% of total)
               </label>
               <input
                 type="number"
@@ -283,8 +328,9 @@ export default function AdminRealtorSettingsPage() {
                 className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
               />
               <p className="text-[11px] text-stone-500 mt-1">
-                Used when Payment Policy is set to Deposit or when guest chooses
-                Deposit checkout.
+                The least a guest can pay upfront when choosing part payment (card
+                or bank transfer). Later payments can be any amount from ₦1,000.
+                Every booking still needs your approval.
               </p>
             </div>
           </div>
@@ -442,6 +488,70 @@ export default function AdminRealtorSettingsPage() {
           >
             <Save className="w-4 h-4" />
             <span>{saving ? 'Saving Configuration...' : 'Save Realtor Settings'}</span>
+          </button>
+        </div>
+      </form>
+
+      {/* Admin account: change password */}
+      <form
+        onSubmit={handleChangePassword}
+        className="bg-white rounded-2xl border border-stone-200/90 p-6 shadow-xs space-y-4"
+      >
+        <div className="flex items-center gap-2 border-b border-stone-100 pb-3">
+          <KeyRound className="w-5 h-5 text-brand-700" />
+          <div>
+            <h2 className="text-base font-bold text-stone-900">Change Admin Password</h2>
+            {currentAdmin && (
+              <p className="text-xs text-stone-500">Signed in as {currentAdmin.email}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <input
+            type="password"
+            autoComplete="current-password"
+            required
+            placeholder="Current password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            required
+            placeholder="New password (8+ characters)"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            required
+            placeholder="Repeat new password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+          />
+        </div>
+
+        {passwordError && (
+          <p className="text-xs text-red-700 flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5" />
+            {passwordError}
+          </p>
+        )}
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={savingPassword}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <KeyRound className="w-4 h-4" />
+            <span>{savingPassword ? 'Updating...' : 'Update Password'}</span>
           </button>
         </div>
       </form>

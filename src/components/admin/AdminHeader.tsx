@@ -16,7 +16,9 @@ interface AdminHeaderProps {
 
 export function AdminHeader({ onOpenMobileSidebar }: AdminHeaderProps) {
   const { bookings } = useBookingContext();
-  const pendingCount = bookings.filter((b) => b.status === 'Pending').length;
+  const pendingCount = bookings.filter(
+    (b) => b.status === 'Pending' || b.status === 'PendingApproval'
+  ).length;
 
   return (
     <header className="sticky top-0 z-30 h-16 bg-white/95 backdrop-blur-md border-b border-stone-200 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
