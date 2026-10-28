@@ -136,6 +136,8 @@ export function BookingTable({
     </div>
   );
 
+  return (
+    <>
       {/* Phones: one card per booking (the table needs a wide screen) */}
       <div className="md:hidden space-y-3">
         {bookings.map((bk) => {
@@ -192,8 +194,6 @@ export function BookingTable({
         })}
       </div>
 
-  return (
-    <>
       <div className="hidden md:block bg-white rounded-2xl border border-stone-200/90 overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
