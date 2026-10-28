@@ -344,7 +344,7 @@ function AdminCalendarContent() {
       cells.push(
         <div
           key={`empty-${i}`}
-          className="min-h-[104px] rounded-xl bg-stone-50/60 border border-stone-100"
+          className="min-h-[52px] sm:min-h-[104px] rounded-lg sm:rounded-xl bg-stone-50/60 border border-stone-100"
         />
       );
     }
@@ -384,7 +384,7 @@ function AdminCalendarContent() {
         <div
           key={dateStr}
           onClick={() => handleCalendarCellClick(targetApt.id, dateStr, info)}
-          className={`min-h-[104px] rounded-xl border p-2.5 flex flex-col justify-between transition-all cursor-pointer select-none ${cardStyle}`}
+          className={`min-h-[52px] sm:min-h-[104px] rounded-lg sm:rounded-xl border p-1 sm:p-2.5 flex flex-col justify-between transition-all cursor-pointer select-none ${cardStyle}`}
         >
           <div className="flex items-center justify-between">
             <span
@@ -397,13 +397,14 @@ function AdminCalendarContent() {
               {day}
             </span>
             {isSelected && (
-              <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-brand-800 text-white">
+              <span className="hidden sm:inline text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-brand-800 text-white">
                 Selected
               </span>
             )}
           </div>
 
-          <div className="mt-2">
+          {/* Phones show the colour-coded day only; details appear from sm up. */}
+          <div className="mt-2 hidden sm:block">
             {info.status === 'confirmed' && info.booking && (
               <div className="p-1.5 rounded-lg bg-emerald-600 text-white text-[11px] leading-tight shadow-2xs">
                 <div className="font-bold truncate">
@@ -451,17 +452,17 @@ function AdminCalendarContent() {
 
     return (
       <div>
-        <div className="grid grid-cols-7 gap-2 mb-2">
+        <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2">
           {WEEKDAYS.map((d) => (
             <div
               key={d}
-              className="text-center text-xs font-bold uppercase tracking-wider text-stone-500 py-1"
+              className="text-center text-[10px] sm:text-xs font-bold uppercase sm:tracking-wider text-stone-500 py-1"
             >
               {d}
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+        <div className="grid grid-cols-7 gap-1 sm:gap-2">
           {cells}
         </div>
       </div>
