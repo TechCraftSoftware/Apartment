@@ -89,9 +89,112 @@ export function BookingTable({
     setDialogState({ isOpen: false, booking: null, targetStatus: 'Cancelled' });
   };
 
+  const renderActions = (bk: Booking) => (
+    <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+      {(bk.status === 'Pending' || bk.status === 'PendingApproval') && (
+        <>
+          <button
+            type="button"
+            onClick={() => handleDirectApprove(bk)}
+            title="Approve & Confirm Booking"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>Confirm</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => openStatusDialog(bk, 'Rejected')}
+            title="Reject Booking Request"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Reject</span>
+          </button>
+        </>
+      )}
+
+      {bk.status === 'Confirmed' && (
+        <button
+          type="button"
+          onClick={() => openStatusDialog(bk, 'Cancelled')}
+          title="Cancel Confirmed Reservation"
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700 text-stone-700 text-xs font-medium transition-colors"
+        >
+          <Ban className="w-3.5 h-3.5" />
+          <span>Cancel</span>
+        </button>
+      )}
+
+      <Link
+        href={`/admin/bookings/${bk.id}`}
+        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-xs font-medium transition-colors"
+      >
+        <Eye className="w-3.5 h-3.5" />
+        <span>Details</span>
+      </Link>
+    </div>
+  );
+
+      {/* Phones: one card per booking (the table needs a wide screen) */}
+      <div className="md:hidden space-y-3">
+        {bookings.map((bk) => {
+          const nights = calculateNights(bk.checkIn, bk.checkOut);
+          const ref = bk.bookingReference || bk.reference;
+          const total = bk.totalPrice || bk.totalAmount;
+          const paid = bk.amountPaid ?? 0;
+          return (
+            <div
+              key={bk.id}
+              className="bg-white rounded-2xl border border-stone-200/90 p-4 shadow-xs space-y-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Link
+                    href={`/admin/bookings/${bk.id}`}
+                    className="font-mono text-xs font-bold text-brand-800 hover:underline"
+                  >
+                    {ref}
+                  </Link>
+                  <p className="font-semibold text-stone-900 truncate">{bk.guestName}</p>
+                  <p className="text-xs text-stone-500 truncate">
+                    {getApartmentName(bk.apartmentId)}
+                  </p>
+                </div>
+                <BookingStatusBadge status={bk.status} size="sm" />
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-stone-700">
+                <Calendar className="w-3.5 h-3.5 text-brand-700 shrink-0" />
+                <span>
+                  {formatDisplayDate(bk.checkIn)} → {formatDisplayDate(bk.checkOut)} • {nights}{' '}
+                  {nights === 1 ? 'night' : 'nights'}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs">
+                  <span className="font-semibold text-stone-900">{formatNaira(total)}</span>
+                  {paid > 0 && (
+                    <span className="text-emerald-700"> • Paid {formatNaira(paid)}</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-1">
+                  <PaymentStatusBadge status={bk.paymentStatus || 'Unpaid'} size="sm" />
+                  {bk.receiptVerificationStatus === 'PendingReview' && (
+                    <ReceiptStatusBadge status="PendingReview" size="sm" />
+                  )}
+                </div>
+              </div>
+              <div className="pt-2 border-t border-stone-100 flex justify-end">
+                {renderActions(bk)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
   return (
     <>
-      <div className="bg-white rounded-2xl border border-stone-200/90 overflow-hidden shadow-xs">
+      <div className="hidden md:block bg-white rounded-2xl border border-stone-200/90 overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -201,50 +304,7 @@ export function BookingTable({
                     </td>
 
                     <td className="py-3.5 px-4 whitespace-nowrap text-right">
-                      <div className="inline-flex items-center justify-end gap-1.5">
-                        {(bk.status === 'Pending' || bk.status === 'PendingApproval') && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleDirectApprove(bk)}
-                              title="Approve & Confirm Booking"
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors cursor-pointer"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              <span>Confirm</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openStatusDialog(bk, 'Rejected')}
-                              title="Reject Booking Request"
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold transition-colors"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                              <span>Reject</span>
-                            </button>
-                          </>
-                        )}
-
-                        {bk.status === 'Confirmed' && (
-                          <button
-                            type="button"
-                            onClick={() => openStatusDialog(bk, 'Cancelled')}
-                            title="Cancel Confirmed Reservation"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700 text-stone-700 text-xs font-medium transition-colors"
-                          >
-                            <Ban className="w-3.5 h-3.5" />
-                            <span>Cancel</span>
-                          </button>
-                        )}
-
-                        <Link
-                          href={`/admin/bookings/${bk.id}`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-xs font-medium transition-colors"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Details</span>
-                        </Link>
-                      </div>
+                      {renderActions(bk)}
                     </td>
                   </tr>
                 );

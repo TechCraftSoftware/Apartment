@@ -196,8 +196,63 @@ export default function AdminPaymentsPage() {
         </div>
       </div>
 
+      {/* Phones: one card per payment */}
+      <div className="md:hidden space-y-3">
+        {filteredPayments.length === 0 ? (
+          <p className="bg-white rounded-2xl border border-stone-200/90 p-6 text-center text-xs text-stone-500">
+            No payment transactions match the selected filter.
+          </p>
+        ) : (
+          filteredPayments.map((pay) => {
+            const booking = bookings.find((b) => b.id === pay.bookingId);
+            const { typeLabel, methodLabel } = describePayment(pay);
+            const bucket = ledgerBucket(pay);
+            return (
+              <Link
+                key={pay.id}
+                href={`/admin/bookings/${pay.bookingId}`}
+                className="block bg-white rounded-2xl border border-stone-200/90 p-4 shadow-xs space-y-2"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs font-bold text-brand-800">
+                      {pay.bookingReference}
+                    </p>
+                    <p className="font-semibold text-stone-900 truncate">
+                      {booking?.guestName || '—'}
+                    </p>
+                  </div>
+                  <p className="text-base font-bold text-stone-900 shrink-0">
+                    {formatNaira(pay.amount)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="text-stone-600">
+                    {typeLabel} • {methodLabel}
+                  </span>
+                  <span
+                    className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                      bucket === 'RECEIVED'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : bucket === 'FAILED'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {FILTER_LABELS[bucket]}
+                  </span>
+                </div>
+                <p className="text-[11px] text-stone-400">
+                  {new Date(pay.paidAt || pay.createdAt).toLocaleString()}
+                </p>
+              </Link>
+            );
+          })
+        )}
+      </div>
+
       {/* Transactions Table */}
-      <div className="bg-white rounded-2xl border border-stone-200/90 shadow-xs overflow-hidden">
+      <div className="hidden md:block bg-white rounded-2xl border border-stone-200/90 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>

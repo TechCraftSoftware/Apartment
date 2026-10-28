@@ -60,7 +60,7 @@ function drawRoundedRect(
 /** Draws the pass as a portrait PNG (phone-screen friendly) and downloads it. */
 async function downloadPassImage(pass: BookingPassDetails, qrDataUrl: string) {
   const W = 720;
-  const H = 1180;
+  const H = 1100;
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
