@@ -21,6 +21,7 @@ import {
   Landmark,
 } from 'lucide-react';
 import { useBookingContext } from '@/context/BookingContext';
+import { BookingPassCard } from '@/components/booking/BookingPassCard';
 import { useGuestBooking } from '@/lib/bookingAccessClient';
 import {
   BookingStatusBadge,
@@ -315,6 +316,25 @@ export default function BookingConfirmationPage() {
               </Link>
             </div>
           </div>
+
+          {/* Booking pass: code + QR to download or screenshot */}
+          <BookingPassCard
+            pass={{
+              businessName: realtorConfig.businessName,
+              bookingReference: ref,
+              guestName: booking.guestName,
+              apartmentName: apartment?.name || 'Serviced Apartment',
+              apartmentLocation: apartment?.location,
+              checkIn: booking.checkIn,
+              checkOut: booking.checkOut,
+              nights,
+              guests: booking.guestCount,
+              bookingStatus: booking.status,
+              paymentStatus: booking.paymentStatus || 'Unpaid',
+              amountPaid,
+              balanceAmount,
+            }}
+          />
 
           {/* Apartment & Dates Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

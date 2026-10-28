@@ -28,6 +28,7 @@ import {
   X,
 } from 'lucide-react';
 import { useBookingContext } from '@/context/BookingContext';
+import { BookingPassCard } from '@/components/booking/BookingPassCard';
 import {
   BookingStatusBadge,
   PaymentStatusBadge,
@@ -330,6 +331,25 @@ function MyBookingContent() {
             </button>
           </div>
         </div>
+
+        {/* Booking pass: code + QR to download or screenshot */}
+        <BookingPassCard
+          pass={{
+            businessName: verifiedBooking.realtorBusinessName,
+            bookingReference: verifiedBooking.bookingReference,
+            guestName: verifiedBooking.customerFullName,
+            apartmentName: verifiedBooking.apartmentName,
+            apartmentLocation: verifiedBooking.apartmentLocation,
+            checkIn: verifiedBooking.checkIn,
+            checkOut: verifiedBooking.checkOut,
+            nights: verifiedBooking.nights,
+            guests: verifiedBooking.guests,
+            bookingStatus: verifiedBooking.status,
+            paymentStatus: verifiedBooking.paymentStatus,
+            amountPaid: verifiedBooking.amountPaid,
+            balanceAmount: verifiedBooking.balanceAmount,
+          }}
+        />
 
         {/* Status & Payment Action Banner */}
         <div className="bg-white rounded-3xl border border-stone-200/90 p-6 sm:p-8 shadow-xs space-y-6">
